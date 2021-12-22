@@ -1,0 +1,95 @@
+# Test per-database database-metadata attribute
+--source include/have_innodb.inc
+--source include/have_log_bin.inc
+connection default;
+
+--disable_query_log
+let $MYSQLD_DATADIR= `select @@datadir`;
+--enable_query_log
+
+--error 1
+file_exists $MYSQLD_DATADIR/mysql/db.opt;
+--error 1
+file_exists $MYSQLD_DATADIR/test/db.opt;
+
+# create database without any options
+create database test2;
+show create database test2;
+--exec cat $MYSQLD_DATADIR/test2/db.opt
+
+# create database with character set, read_only and db_metadata
+create database test3 character set utf8 read_only=true db_metadata = "{\"shard\":\"test3_shard\"}";
+show create database test3;
+--exec cat $MYSQLD_DATADIR/test3/db.opt
+
+# create database
+create database test4;
+show create database test4;
+--exec cat $MYSQLD_DATADIR/test4/db.opt
+
+# create database with character set, read_only and db_metadata
+create database test5 character set utf16 read_only=true db_metadata = "{\"shard\":\"test5_shard\"}";
+show create database test5;
+--exec cat $MYSQLD_DATADIR/test5/db.opt
+
+# create database
+create database test6;
+show create database test6;
+--exec cat $MYSQLD_DATADIR/test6/db.opt
+
+ # Modify test2/db.opt and test8/db.opt and let all field take default value
+--exec echo > $MYSQLD_DATADIR/test4/db.opt
+--exec echo > $MYSQLD_DATADIR/test6/db.opt
+
+# Restart server to get rid of the dboptions cache
+--source include/restart_mysqld.inc
+
+# Reload values from all db.opt and make sure we load them correctly
+# And the default values are loaded correctly (not get polluted by previous
+# values)
+select catalog_name, schema_name, default_character_set_name, default_collation_name, sql_path from information_schema.schemata;
+select catalog_name, schema_name, db_metadata from information_schema.schemata_ext;
+show create database test4;
+show create database test6;
+
+# create database with db_metadatae
+create database test7 db_metadata = "{\"shard\":\"test7_shard\"}";
+show create database test7;
+# modify database with bad db_metadatae
+# db_metadata should be a json object, but now we modify it with json array
+--exec echo "db-metadata=[{\"shard\": \"test3_shard\", \"data2\": \"date2_shard\"}]" > $MYSQLD_DATADIR/test7/db.opt
+
+# Restart server to get rid of the dboptions cache
+--source include/restart_mysqld.inc
+set @start_binlog_trx_meta_data= @@global.binlog_trx_meta_data;
+set @start_log_warnings = @@global.log_warnings;
+
+# show db_metadata
+set @@global.binlog_trx_meta_data= 1;
+set @@global.log_warnings= 2;
+select catalog_name, schema_name, default_character_set_name, default_collation_name, sql_path from information_schema.schemata;
+select catalog_name, schema_name, db_metadata from information_schema.schemata_ext;
+show create database test7;
+
+# suppress error during THD::gen_trx_metadata
+--disable_query_log
+call mtr.add_suppression("Exception while adding meta data");
+call mtr.add_suppression("Exception while reading meta data: \\[\\{\"shard\": \"test3_shard\", \"data2\": \"date2_shard\"\\}\\]");
+--enable_query_log
+
+# bad db-metadata won't crash mysqld or trigger assert
+use test7;
+create table t7 (a int, b int, primary key(a,b));
+drop table t7;
+set @@global.binlog_trx_meta_data = @start_binlog_trx_meta_data;
+set @@global.log_warnings = @start_log_warnings;
+
+# cleanup
+--disable_warnings
+drop database if exists test2;
+drop database if exists test3;
+drop database if exists test4;
+drop database if exists test5;
+drop database if exists test6;
+drop database if exists test7;
+--enable_warnings

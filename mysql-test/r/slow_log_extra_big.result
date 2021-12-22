@@ -1,0 +1,48 @@
+set @my_slow_logname = @@global.slow_query_log_file;
+set global slow_query_log_file = "slow_log_extra_big-slow.log";
+set @my_long_query_time = @@global.long_query_time;
+set session long_query_time = 20;
+set global long_query_time = 0;
+select count(*) from big_table_slow;
+count(*)
+20000
+select count(*) from big_table_slow;
+count(*)
+20000
+select count(*) from big_table_slow where id>1000 and id<2000;
+count(*)
+499
+select * from big_table_slow where id=2;
+id	v	t
+2	v	bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbba
+select count(*) from big_table_slow where id >10000;
+count(*)
+15000
+select count(*) from big_table_slow where id < 100000;
+count(*)
+20000
+set session long_query_time = 10000;
+select count(*) from big_table_slow where id >10000;
+count(*)
+15000
+# Cleanup
+SET GLOBAL innodb_file_format = "Barracuda";
+set global slow_query_log_file = @my_slow_logname;
+set global long_query_time=@my_long_query_time;
+drop table big_table_slow;
+#
+# This is a hack to check the log result.
+# We strip off time related fields (non-deterministic)
+# and verify the rest are correct.
+#
+select * from log_output;
+Rows_sent	Rows_examined	Errno	Killed	Bytes_received	Bytes_sent	Read_first	Read_last	Read_key	Read_next	Read_prev	Read_rnd	Read_rnd_next	RocksDB_key_skipped	RocksDB_del_skipped	Sort_merge_passes	Sort_range_count	Sort_rows	Sort_scan_count	Created_tmp_disk_tables	Tmp_table_bytes_written
+1	20000	0	0	0	67	1	0	1	20000	0	0	0	0	0	0	0	0	0	0	0
+1	20000	0	0	0	67	1	0	1	20000	0	0	0	0	0	0	0	0	0	0	0
+1	499	0	0	0	65	0	0	1	499	0	0	0	0	0	0	0	0	0	0	0
+1	1	0	0	0	314	0	0	1	0	0	0	0	0	0	0	0	0	0	0	0
+1	15000	0	0	0	67	0	0	1	15000	0	0	0	0	0	0	0	0	0	0	0
+1	20000	0	0	0	67	1	0	1	20000	0	0	0	0	0	0	0	0	0	0	0
+1	15000	0	0	0	67	0	0	1	15000	0	0	0	0	0	0	0	0	0	0	0
+if the following is not 1 you need to adjust the file_lines_count variable
+1

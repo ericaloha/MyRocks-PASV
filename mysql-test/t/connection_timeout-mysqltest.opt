@@ -1,0 +1,2 @@
+--connect-timeout=1200
+--disallow_async_client

@@ -1,0 +1,133 @@
+# This test is to check various cases of logging plugin variables changes.
+
+SET @old_config = @@global.log_global_var_changes;
+SELECT @old_config;
+
+# call mtr.add_suppression("Global variable");
+
+--echo ###### Enable logging global var changes
+SET GLOBAL log_global_var_changes = TRUE;
+
+--echo ###### Integer category
+--echo ### MYSQL_SYSVAR_INT
+SET @old_val = @@global.rocksdb_max_background_jobs;
+SELECT @old_val;
+
+SET GLOBAL rocksdb_max_background_jobs = -1;
+SELECT @@global.rocksdb_max_background_jobs;
+
+SET GLOBAL rocksdb_max_background_jobs = 1;
+SELECT @@global.rocksdb_max_background_jobs;
+
+SET @@global.rocksdb_max_background_jobs = @old_val;
+SELECT @@global.rocksdb_max_background_jobs;
+
+--echo ### MYSQL_SYSVAR_UINT
+SET @old_val = @@global.rocksdb_max_latest_deadlocks;
+SELECT @old_val;
+
+SET GLOBAL rocksdb_max_latest_deadlocks = 10;
+SELECT @@global.rocksdb_max_latest_deadlocks;
+
+SET @@global.rocksdb_max_latest_deadlocks = @old_val;
+SELECT @@global.rocksdb_max_latest_deadlocks;
+
+--echo ### MYSQL_SYSVAR_ULONG
+SET @old_val = @@global.rocksdb_compaction_readahead_size;
+SELECT @old_val;
+
+SET GLOBAL rocksdb_compaction_readahead_size = 1000000;
+SELECT @@global.rocksdb_compaction_readahead_size;
+
+SET @@global.rocksdb_compaction_readahead_size = @old_val;
+SELECT @@global.rocksdb_compaction_readahead_size;
+
+--echo ### MYSQL_SYSVAR_LONGLONG
+SET @old_val = @@global.rocksdb_compaction_sequential_deletes_file_size;
+SELECT @old_val;
+
+SET GLOBAL rocksdb_compaction_sequential_deletes_file_size = -1;
+SELECT @@global.rocksdb_compaction_sequential_deletes_file_size;
+
+SET GLOBAL rocksdb_compaction_sequential_deletes_file_size = 1000000000000;
+SELECT @@global.rocksdb_compaction_sequential_deletes_file_size;
+
+SET @@global.rocksdb_compaction_sequential_deletes_file_size = @old_val;
+SELECT @@global.rocksdb_compaction_sequential_deletes_file_size;
+
+--echo ### MYSQL_SYSVAR_ULONGLONG
+SET @old_val = @@global.rocksdb_sst_mgr_rate_bytes_per_sec;
+SELECT @old_val;
+
+SET GLOBAL rocksdb_sst_mgr_rate_bytes_per_sec = 9223372036854775808;
+SELECT @@global.rocksdb_sst_mgr_rate_bytes_per_sec;
+
+SET @@global.rocksdb_sst_mgr_rate_bytes_per_sec = @old_val;
+SELECT @@global.rocksdb_sst_mgr_rate_bytes_per_sec;
+
+--echo ### MYSQL_SYSVAR_ENUM
+SET @old_val = @@global.rocksdb_read_free_rpl;
+SELECT @old_val;
+
+SET GLOBAL rocksdb_read_free_rpl = PK_SK;
+SELECT @@global.rocksdb_read_free_rpl;
+
+SET @@global.rocksdb_read_free_rpl = @old_val;
+SELECT @@global.rocksdb_read_free_rpl;
+
+--echo ### MYSQL_SYSVAR_BOOL
+SET @old_val = @@global.rocksdb_enable_remove_orphaned_dropped_cfs;
+SELECT @old_val;
+
+SET GLOBAL rocksdb_enable_remove_orphaned_dropped_cfs = FALSE;
+SELECT @@rocksdb_enable_remove_orphaned_dropped_cfs;
+
+SET @@global.rocksdb_enable_remove_orphaned_dropped_cfs = @old_val;
+SELECT @@global.rocksdb_enable_remove_orphaned_dropped_cfs;
+
+--echo ###### String category
+--echo ### MYSQL_SYSVAR_STR
+SET @old_val = @@global.rocksdb_read_free_rpl_tables;
+SELECT @old_val;
+
+SET GLOBAL rocksdb_read_free_rpl_tables = 'mytable';
+SELECT @@global.rocksdb_read_free_rpl_tables;
+
+SET GLOBAL rocksdb_read_free_rpl_tables = @old_val;
+SELECT @@global.rocksdb_read_free_rpl_tables;
+
+--echo ###### Corner cases
+--echo ### Check and no-op update vars
+CREATE TABLE cf_test_table (
+  id1 int(10) unsigned NOT NULL DEFAULT '0',
+  PRIMARY KEY (id1) COMMENT 'cf_primary_key'
+) ENGINE=ROCKSDB;
+
+DROP TABLE cf_test_table;
+
+SET GLOBAL rocksdb_compact_cf = 'cf_primary_key';
+SELECT @@global.rocksdb_compact_cf;
+
+SET GLOBAL rocksdb_delete_cf = 'cf_primary_key';
+SELECT @@global.rocksdb_delete_cf;
+
+--replace_result $MYSQL_TMP_DIR TMP
+--eval SET GLOBAL rocksdb_create_checkpoint = '$MYSQL_TMP_DIR/abc'
+SELECT @@global.rocksdb_create_checkpoint;
+
+SET GLOBAL rocksdb_force_flush_memtable_now = ON;
+SELECT @@global.rocksdb_force_flush_memtable_now;
+
+SET GLOBAL rocksdb_force_flush_memtable_and_lzero_now = ON;
+SELECT @@global.rocksdb_force_flush_memtable_and_lzero_now;
+
+--echo ###### Restore value of logging global var changes
+SET GLOBAL log_global_var_changes = @old_config;
+SELECT @@global.log_global_var_changes;
+
+--echo ### Clean up
+--exec rm -r $MYSQL_TMP_DIR/abc
+
+--echo ### Verifying error log
+--exec grep "Global variable .* by user .* from host" $MYSQLTEST_VARDIR/log/mysqld.1.err | cut -d] -f2 | tail -n 24
+--exit

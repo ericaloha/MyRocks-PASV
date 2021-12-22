@@ -1,0 +1,18 @@
+source include/master-slave.inc;
+source include/not_binlog_format_row.inc; # we have binlog_trx_meta_data_rbr.test for this
+
+# Enable trx meta data
+connection master;
+set @@global.binlog_trx_meta_data= true;
+connection slave;
+set @@global.binlog_trx_meta_data= true;
+
+source suite/rpl/include/binlog_trx_meta_data.inc;
+
+# Cleanup
+connection master;
+set @@global.binlog_trx_meta_data= default;
+connection slave;
+set @@global.binlog_trx_meta_data= default;
+
+source include/rpl_end.inc;

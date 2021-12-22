@@ -1,0 +1,1093 @@
+--source include/no_perfschema.inc
+
+--source include/count_sessions.inc
+
+create user user_super@localhost identified by 'su';
+grant all on *.* to user_super@localhost with grant option;
+
+connect (con13, localhost, user_super,su,test);
+
+####################################################
+### Case 1: sql_stats_control=OFF_HARD, no data will be stored in sql_statistics.
+####################################################
+--echo Case 1: sql_stats_control=OFF_HARD
+select @@sql_stats_control;
+select 42;
+select sql_id, plan_id, table_schema, user_name, execution_count
+from information_schema.sql_statistics;
+
+####################################################
+### Case 2: sql_stats_control=ON, Data will be stored in sql_statistics.
+####################################################
+--echo Case 2: sql_stats_control=ON
+set @@GLOBAL.sql_stats_control="ON";
+select @@sql_stats_control;
+set @@GLOBAL.sql_plans_control=ON;
+select @@sql_plans_control;
+select 1;
+select 2;
+select 100;
+
+select sql_id, plan_id, table_schema, user_name, execution_count
+from information_schema.sql_statistics order by sql_id;
+
+create table t1(c int);
+insert into t1 values(1);
+insert into t1 values(2);
+insert into t1 values(3);
+insert into t1 values(4);
+insert into t1 values(5);
+update t1 set c=c+100;
+update t1 set c=c+300;
+update t1 set c=c+500;
+delete from t1 where c=905;
+delete from t1 where c=903;
+
+# Join Query
+select a.c c1, b.c c2
+  from t1 a, t1 b
+ where a.c <= b.c
+order by 1, 2;
+
+# Group-by Query
+select c.c, min(a.c), max(b.c)
+  from t1 a, t1 b, t1 c
+ where a.c <= b.c and a.c <= c.c
+group by c.c
+order by 1, 2, 3;
+
+# Group-by Query
+select a.c, b.c, sum(c.c)
+  from t1 a, t1 b, t1 c
+ where a.c <= b.c and a.c <= c.c
+group by a.c, b.c
+order by 1, 2, 3;
+
+# Group-by + Having Query
+select a.c, b.c, sum(c.c)
+  from t1 a, t1 b, t1 c
+ where a.c <= b.c and a.c <= c.c
+group by a.c, b.c
+having sum(c.c) < 2000
+order by 1, 2, 3;
+
+# Group-by + Having Query
+select a.c, b.c, sum(c.c)
+  from t1 a, t1 b, t1 c
+ where a.c <= b.c and a.c <= c.c
+group by a.c, b.c
+having sum(c.c) < 2000
+order by 1, 2, 3;
+
+#Exists Sub-Query
+select c
+  from t1 a
+  where exists (select sum_val
+                  from (select a.c c1, b.c c2, sum(c.c) sum_val
+                          from t1 a, t1 b, t1 c
+                         where a.c <= b.c and a.c <= c.c
+                         group by a.c, b.c having sum(c.c) < 2000) v1
+                 where sum_val = a.c)
+order by 1;
+
+#Not-exists Sub-Query
+select c
+  from t1 a
+  where not exists (select sum_val
+                  from (select a.c c1, b.c c2, sum(c.c) sum_val
+                          from t1 a, t1 b, t1 c
+                         where a.c <= b.c and a.c <= c.c
+                         group by a.c, b.c having sum(c.c) < 2000) v1
+                 where sum_val = a.c)
+order by 1;
+
+select sql_id, plan_id, table_schema, user_name, execution_count,
+	rows_inserted, rows_updated, rows_deleted, rows_read, rows_sent,
+        tmp_table_bytes_written, filesort_bytes_written
+from information_schema.sql_statistics
+order by sql_id;
+
+# Join sql_statistics and sql_text tables
+select information_schema.sql_statistics.sql_id, table_schema, user_name,
+  execution_count, sql_text
+from information_schema.sql_statistics, information_schema.sql_text
+where information_schema.sql_statistics.sql_id=information_schema.sql_text.sql_id
+order by sql_id;
+
+
+####################################################
+### Case 3: sql_stats_control=OFF_SOFT. Disable collection, but keep the data around.
+####################################################
+--echo Case 3: sql_stats_control=OFF_SOFT. Disable collection, but keep the data around.
+set @@GLOBAL.sql_stats_control="OFF_SOFT";
+select @@sql_stats_control;
+select 1 union select 2;
+select 1 union select 2 union select 3;
+select sql_id, plan_id, table_schema, user_name, execution_count,
+	rows_inserted, rows_updated, rows_deleted, rows_read, rows_sent,
+        tmp_table_bytes_written, filesort_bytes_written
+from information_schema.sql_statistics
+order by sql_id;
+
+####################################################
+### Case 4: sql_stats_control=OFF_HARD. Disable, and check if all data is deleted.
+####################################################
+--echo Case 4: sql_stats_control=OFF_HARD. Disable, and check if all data is deleted.
+set @@GLOBAL.sql_stats_control="OFF_HARD";
+select @@sql_stats_control;
+select sql_id, plan_id, table_schema, user_name, execution_count,
+	rows_inserted, rows_updated, rows_deleted, rows_read, rows_sent,
+        tmp_table_bytes_written, filesort_bytes_written
+from information_schema.sql_statistics
+order by sql_id;
+
+####################################################
+### Case 5: sql_stats_control=ON. Re-enable to make sure that data is making its way to sql_statistics.
+####################################################
+--echo Case 5: sql_stats_control=ON. Re-enable to make sure that data is making its way to sql_statistics.
+set @@GLOBAL.sql_stats_control="ON";
+select @@sql_stats_control;
+select 101;
+select sql_id, plan_id, table_schema, user_name, execution_count,
+	rows_inserted, rows_updated, rows_deleted, rows_read, rows_sent,
+        tmp_table_bytes_written, filesort_bytes_written
+from information_schema.sql_statistics
+order by sql_id;
+
+####################################################
+### Case 6: Multi-query support
+####################################################
+--echo Case 6: Multi-query support
+set @@GLOBAL.sql_stats_control="OFF_HARD";
+set @@GLOBAL.sql_stats_control="ON";
+select @@sql_stats_control;
+delimiter ||||;
+
+select 1;
+select 2;
+select 3;
+create table t2(c int);
+insert into t2 values(100);
+select * from t2;
+update t2 set c=c+7;
+delete from t2 where c=107;
+drop table t2;
+||||
+
+select sql_id, plan_id, table_schema, user_name, execution_count,
+	rows_inserted, rows_updated, rows_deleted, rows_read, rows_sent,
+        tmp_table_bytes_written, filesort_bytes_written
+from information_schema.sql_statistics
+order by sql_id||||
+
+# reset delimiter
+delimiter ;||||
+
+####################################################
+### Case 7: Query no sampling by default
+####################################################
+--echo Case 7: Query no sampling by default
+set @@GLOBAL.sql_stats_control="OFF_HARD";
+set @@GLOBAL.sql_stats_control="ON";
+select @@sql_stats_control;
+
+select 1;
+select 3;
+select 4;
+
+select sql_id, plan_id, table_schema, user_name, query_sample_text,
+  query_sample_seen, execution_count, rows_inserted, rows_updated,
+	rows_deleted, rows_read, rows_sent,
+        tmp_table_bytes_written, filesort_bytes_written
+from information_schema.sql_statistics
+order by sql_id;
+
+####################################################
+### Case 8: Query Only Once Sampling support
+####################################################
+--echo Case 8: Query Only Once Sampling support
+set @@GLOBAL.sql_stats_control="OFF_HARD";
+set @@GLOBAL.sql_stats_control="ON";
+set @@GLOBAL.max_digest_sample_age=0;
+select @@sql_stats_control;
+select @@max_digest_sample_age;
+
+select 1;
+select 3;
+select 4;
+
+select sql_id, plan_id, table_schema, user_name, query_sample_text,
+  (query_sample_seen > 0) as is_query_sample_seen_valid, execution_count,
+	rows_inserted, rows_updated, rows_deleted, rows_read, rows_sent,
+        tmp_table_bytes_written, filesort_bytes_written
+from information_schema.sql_statistics
+order by sql_id;
+
+####################################################
+### Case 9: Query Re-sampling support
+####################################################
+--echo Case 9: Query Re-sampling support
+set @@GLOBAL.sql_stats_control="OFF_HARD";
+set @@GLOBAL.sql_stats_control="ON";
+set @@GLOBAL.max_digest_sample_age=1;
+select @@sql_stats_control;
+select @@max_digest_sample_age;
+
+select 1;
+select sleep(2);
+select 3;
+select 4;
+
+select sql_id, plan_id, table_schema, user_name, query_sample_text,
+  (query_sample_seen > 0 && CURRENT_TIMESTAMP - query_sample_seen < 10)
+	as is_query_sample_seen_valid, execution_count, rows_inserted,
+	rows_updated, rows_deleted, rows_read, rows_sent,
+        tmp_table_bytes_written, filesort_bytes_written
+from information_schema.sql_statistics
+where sql_id = 'ea1a18bec5a37513f7a0720e73526477'
+order by sql_id;
+
+####################################################
+### Case 10: Multi-query support
+####################################################
+--echo Case 10: Multi-query support
+set @@GLOBAL.sql_stats_control="OFF_HARD";
+set @@GLOBAL.sql_stats_control="ON";
+select @@sql_stats_control;
+delimiter ||||;
+
+select 1;
+select 2;
+select 3;
+create table t10(c int);
+insert into t10 values(1);
+insert into t10 values(2);
+insert into t10 values(3);
+insert into t10 select * from t10;
+insert into t10 select * from t10;
+insert into t10 select * from t10;
+select c from t10 order by 1;
+select * from t10 where c=1 order by 1;
+drop table t10;
+||||
+
+select sql_id, plan_id, table_schema, user_name, execution_count,
+	rows_inserted, rows_updated, rows_deleted, rows_read, rows_sent,
+        tmp_table_bytes_written, filesort_bytes_written
+from information_schema.sql_statistics
+order by sql_id||||
+
+# reset delimiter
+delimiter ;||||
+
+####################################################
+### Case 11: Multi-query support
+####################################################
+--echo Case 11: Multi-query support
+set @@GLOBAL.sql_stats_control="OFF_HARD";
+set @@GLOBAL.sql_stats_control="ON";
+select @@sql_stats_control;
+delimiter ||||;
+
+select 1;
+select 2;
+select 3;
+create table t11(c int);
+insert into t11 values(1);
+insert into t11 values(2);
+insert into t11 values(3);
+insert into t11 select * from t11;
+insert into t11 select * from t11;
+insert into t11 select * from t11;
+select c from t11 order by 1;
+select * from t11 where c=1 order by 1;
+update t11 set c=c+100 where c>1;
+drop table t11;
+||||
+
+select sql_id, plan_id, table_schema, user_name, execution_count,
+	rows_inserted, rows_updated, rows_deleted, rows_read, rows_sent,
+        tmp_table_bytes_written, filesort_bytes_written
+from information_schema.sql_statistics
+order by sql_id||||
+
+# reset delimiter
+delimiter ;||||
+
+####################################################
+### Case 12: Multi-query support
+####################################################
+--echo Case 12: Multi-query support
+set @@GLOBAL.sql_stats_control="OFF_HARD";
+set @@GLOBAL.sql_stats_control="ON";
+select @@sql_stats_control;
+delimiter ||||;
+
+select 1;
+select 2;
+select 3;
+create table t12(c int);
+insert into t12 values(1);
+insert into t12 values(2);
+insert into t12 values(3);
+insert into t12 select * from t12;
+insert into t12 select * from t12;
+insert into t12 select * from t12;
+select c from t12 order by 1;
+select * from t12 where c=1 order by 1;
+insert into t12 select * from t12 where c > 1;
+drop table t12;
+||||
+
+select sql_id, plan_id, table_schema, user_name, execution_count,
+	rows_inserted, rows_updated, rows_deleted, rows_read, rows_sent,
+        tmp_table_bytes_written, filesort_bytes_written
+from information_schema.sql_statistics
+order by sql_id||||
+
+# reset delimiter
+delimiter ;||||
+
+####################################################
+### Case 13: Multi-query support
+####################################################
+--echo Case 13: Multi-query support
+set @@GLOBAL.sql_stats_control="OFF_HARD";
+set @@GLOBAL.sql_stats_control="ON";
+select @@sql_stats_control;
+delimiter ||||;
+
+select 1;
+select 2;
+select 3;
+create table t13(c int);
+insert into t13 values(1);
+insert into t13 values(2);
+insert into t13 values(3);
+insert into t13 select * from t13;
+insert into t13 select * from t13;
+insert into t13 select * from t13;
+select c from t13 order by 1;
+select * from t13 where c=1 order by 1;
+insert into t13 select * from t13 where c > 1;
+update t13 set c=c+100 where c>1;
+drop table t13;
+||||
+
+select sql_id, plan_id, table_schema, user_name, execution_count,
+	rows_inserted, rows_updated, rows_deleted, rows_read, rows_sent,
+        tmp_table_bytes_written, filesort_bytes_written
+from information_schema.sql_statistics
+order by sql_id||||
+
+# reset delimiter
+delimiter ;||||
+
+####################################################
+### Case 14: Multi-query support
+####################################################
+--echo Case 14: Multi-query support
+set @@GLOBAL.sql_stats_control="OFF_HARD";
+set @@GLOBAL.sql_stats_control="ON";
+select @@sql_stats_control;
+delimiter ||||;
+
+select 1;
+select 2;
+select 3;
+create table t14(c int);
+insert into t14 values(1);
+insert into t14 values(2);
+insert into t14 values(3);
+insert into t14 select * from t14;
+insert into t14 select * from t14;
+insert into t14 select * from t14;
+select * from t14 where c=1 order by 1;
+insert into t14 select * from t14 where c > 1;
+update t14 set c=c+100 where c>1;
+drop table t14;
+||||
+
+select sql_id, plan_id, table_schema, user_name, execution_count,
+	rows_inserted, rows_updated, rows_deleted, rows_read, rows_sent,
+        tmp_table_bytes_written, filesort_bytes_written
+from information_schema.sql_statistics
+order by sql_id||||
+
+# reset delimiter
+delimiter ;||||
+
+####################################################
+### Case 15: Multi-query support
+####################################################
+--echo Case 15: Multi-query support
+set @@GLOBAL.sql_stats_control="OFF_HARD";
+set @@GLOBAL.sql_stats_control="ON";
+select @@sql_stats_control;
+delimiter ||||;
+
+select 1;
+select 2;
+select 3;
+create table t15(c int);
+insert into t15 values(1);
+insert into t15 values(2);
+insert into t15 values(3);
+insert into t15 select * from t15;
+insert into t15 select * from t15;
+insert into t15 select * from t15;
+insert into t15 select * from t15 where c > 1;
+update t15 set c=c+100 where c>1;
+drop table t15;
+||||
+
+select sql_id, plan_id, table_schema, user_name, execution_count,
+	rows_inserted, rows_updated, rows_deleted, rows_read, rows_sent,
+        tmp_table_bytes_written, filesort_bytes_written
+from information_schema.sql_statistics
+order by sql_id||||
+
+# reset delimiter
+delimiter ;||||
+
+####################################################
+### Case 16: Flush sql_statistics
+####################################################
+--echo Case 16: Flush sql_statistics and confirm that all stats are gone.
+flush sql_statistics;
+
+select sql_id, plan_id, table_schema, user_name, execution_count,
+	rows_inserted, rows_updated, rows_deleted, rows_read, rows_sent
+from information_schema.sql_statistics
+order by sql_id;
+select * from information_schema.sql_text;
+select count(*) from information_schema.client_attributes;
+
+####################################################
+### Case 17: Temp Table Space and Filesort Space Statistics
+####################################################
+--echo Case 17: Temp Table Space and Filesort Space Statistics
+set @@GLOBAL.sql_stats_control="OFF_HARD";
+set @@GLOBAL.sql_stats_control="ON";
+select @@sql_stats_control;
+
+create table t17 (i int, c char(255));
+
+insert into t17 values (0, lpad('a', 250, 'b'));
+insert into t17 select i+1,c from t17;
+insert into t17 select i+2,c from t17;
+insert into t17 select i+4,c from t17;
+insert into t17 select i+8,c from t17;
+insert into t17 select i+16,c from t17;
+insert into t17 select i+32,c from t17;
+insert into t17 select i+64,c from t17;
+insert into t17 select i+128,c from t17;
+insert into t17 select i+256,c from t17;
+
+set session tmp_table_size=16384;
+set session max_heap_table_size=16384;
+
+set global sql_stats_control = ON;
+
+insert into t17 select i+512,c from t17;
+
+--disable_result_log
+select i, substr(c, 1, 10) from t17 group by i, c;
+
+select i, substr(c, 1, 10) from t17 order by i, c;
+
+select i, substr(c, 1, 10) from t17 group by i, c order by i, c;
+
+select count(*) from (select * from t17) v;
+--enable_result_log
+
+select t.sql_text, s.rows_inserted, s.rows_updated, s.rows_deleted,
+       s.rows_read, s.rows_sent, s.tmp_table_bytes_written, s.filesort_bytes_written
+  from information_schema.sql_statistics s, information_schema.sql_text t
+ where s.sql_id = t.sql_id and t.sql_text not like '%information_schema%'
+order by 1,2,3,4,5,6,7,8;
+
+create temporary table tm_t17(i int, c char(255)) engine=myisam;
+
+insert into tm_t17 select * from t17;
+
+update tm_t17 set c = lpad('b', 250, 'a');
+
+delete from tm_t17 where i < 100;
+
+drop temporary table tm_t17;
+
+select t.sql_text, s.rows_inserted, s.rows_updated, s.rows_deleted,
+       s.rows_read, s.rows_sent, s.tmp_table_bytes_written, s.filesort_bytes_written
+  from information_schema.sql_statistics s, information_schema.sql_text t
+ where s.sql_id = t.sql_id and t.sql_text not like '%information_schema%'
+order by 1,2,3,4,5,6,7,8;
+
+drop table t17;
+
+select t.sql_text, s.rows_inserted, s.rows_updated, s.rows_deleted,
+       s.rows_read, s.rows_sent, s.tmp_table_bytes_written, s.filesort_bytes_written
+  from information_schema.sql_statistics s, information_schema.sql_text t
+ where s.sql_id = t.sql_id and t.sql_text not like '%information_schema%'
+order by 1,2,3,4,5,6,7,8;
+
+####################################################
+### Case 18: Multiple statement support for Temp Table Space and Filesort Space Statistics
+####################################################
+--echo Case 18: Multiple statement support for Temp Table Space and Filesort Space Statistics
+set @@GLOBAL.sql_stats_control="OFF_HARD";
+set @@GLOBAL.sql_stats_control="ON";
+select @@sql_stats_control;
+
+create table t18 (i int, c char(255));
+
+insert into t18 values (0, lpad('a', 250, 'b'));
+insert into t18 select i+1,c from t18;
+insert into t18 select i+2,c from t18;
+insert into t18 select i+4,c from t18;
+insert into t18 select i+8,c from t18;
+insert into t18 select i+16,c from t18;
+insert into t18 select i+32,c from t18;
+insert into t18 select i+64,c from t18;
+insert into t18 select i+128,c from t18;
+insert into t18 select i+256,c from t18;
+
+set session tmp_table_size=16384;
+set session max_heap_table_size=16384;
+
+set global sql_stats_control = ON;
+
+select t.sql_text, s.rows_inserted, s.rows_updated, s.rows_deleted,
+       s.rows_read, s.rows_sent, s.tmp_table_bytes_written, s.filesort_bytes_written
+  from information_schema.sql_statistics s, information_schema.sql_text t
+ where s.sql_id = t.sql_id and t.sql_text not like '%information_schema%'
+order by 1,2,3,4,5,6,7,8;
+
+--disable_result_log
+
+delimiter ||||;
+insert into t18 select i+512,c from t18;
+
+select i, substr(c, 1, 10) from t18 group by i, c;
+
+select i, substr(c, 1, 10) from t18 order by i, c;
+
+select i, substr(c, 1, 10) from t18 group by i, c order by i, c;
+
+select count(*) from (select * from t18) v;
+
+create temporary table tm_t18(i int, c char(255)) engine=myisam;
+
+insert into tm_t18 select * from t18;
+
+update tm_t18 set c = lpad('b', 250, 'a');
+
+delete from tm_t18 where i < 100;
+
+drop temporary table tm_t18;
+
+drop table t18;
+||||
+
+--enable_result_log
+
+select t.sql_text, s.rows_inserted, s.rows_updated, s.rows_deleted,
+       s.rows_read, s.rows_sent, s.tmp_table_bytes_written, s.filesort_bytes_written
+  from information_schema.sql_statistics s, information_schema.sql_text t
+ where s.sql_id = t.sql_id and t.sql_text not like '%information_schema%'
+order by 1,2,3,4,5,6,7,8||||
+
+# reset delimiter
+delimiter ;||||
+
+###########################################################
+### Case 19: Test for index_dive_count and index_dive_cpu
+###########################################################
+
+## Setup
+set global sql_stats_control=OFF_HARD;
+
+create table idx_dive_tbl(a1 int, a2 int, a3 int, a4 int, a5 int,
+                  a6 int, a7 int, a8 int, a9 int, a10 int);
+
+delimiter //;
+
+create procedure populate()
+begin
+  declare i int default 0;
+  while i < 100 do
+    insert into idx_dive_tbl values(i, i+1, i+2, i+3, i+4,
+                                    i, i+1, i+2, i+3, i+4);
+    set i = i + 1;
+  end while;
+end //
+
+delimiter ;//
+
+call populate();
+
+create index idx_dive_tbl_idx_a1 on idx_dive_tbl(a1);
+create index idx_dive_tbl_idx_a2 on idx_dive_tbl(a2);
+create index idx_dive_tbl_idx_a3 on idx_dive_tbl(a3);
+create index idx_dive_tbl_idx_a4 on idx_dive_tbl(a4);
+create index idx_dive_tbl_idx_a5 on idx_dive_tbl(a5);
+create index idx_dive_tbl_idx_a6 on idx_dive_tbl(a6);
+create index idx_dive_tbl_idx_a7 on idx_dive_tbl(a7);
+create index idx_dive_tbl_idx_a8 on idx_dive_tbl(a8);
+create index idx_dive_tbl_idx_a9 on idx_dive_tbl(a9);
+create index idx_dive_tbl_idx_a10 on idx_dive_tbl(a10);
+
+set optimizer_trace_max_mem_size=1048576; # 1MB
+
+SET end_markers_in_json=off;
+
+## The following test increase and decrease the value of
+## eq_range_index_dive_limit and verify that the index dive
+## statistics are tracked correctly
+
+###########################################################
+### Case 19.1: Default value of eq_range_index_dive_limit (10)
+###            9 index dives are expected
+###########################################################
+
+flush sql_statistics;
+
+--echo Case 19.1: eq_range_index_dive_limit=10
+SET eq_range_index_dive_limit=10;
+
+SET optimizer_trace="enabled=on,one_line=off";
+
+set global sql_stats_control=ON;
+
+set @trace_count = 0;
+
+# Index dive queries are performed only on predicates using a1 to a9 but
+# not on predicates using a10. Hence the index_dive_count is
+# (1+2+3+4+5+6+7+8+9) = 45
+select count(*)
+from idx_dive_tbl
+where idx_dive_tbl.a1  in (10)
+  and idx_dive_tbl.a2  in (10, 20)
+  and idx_dive_tbl.a3  in (10, 20, 30)
+  and idx_dive_tbl.a4  in (10, 20, 30, 40)
+  and idx_dive_tbl.a5  in (10, 20, 30, 40, 50)
+  and idx_dive_tbl.a6  in (10, 20, 30, 40, 50, 60)
+  and idx_dive_tbl.a7  in (10, 20, 30, 40, 50, 60, 70)
+  and idx_dive_tbl.a8  in (10, 20, 30, 40, 50, 60, 70, 80)
+  and idx_dive_tbl.a9  in (10, 20, 30, 40, 50, 60, 70, 80, 90)
+  and idx_dive_tbl.a10 in (10, 20, 30, 40, 50, 60, 70, 80, 90, 100);
+
+select round(length(trace)-
+             length(replace(trace, "\"index_dives_for_eq_ranges\": true", "")))
+               /length("\"index_dives_for_eq_ranges\": true") into @trace_count
+  from information_schema.optimizer_trace;
+
+set global sql_stats_control=OFF_SOFT;
+
+SET optimizer_trace="enabled=off";
+
+select sql_text, index_dive_count,
+       cast(@trace_count as UNSIGNED) as indexes_accessed_for_dive,
+       case
+            when index_dive_count = 45 then "Success"
+            else "Fail"
+       end as test_status,
+       case
+           when index_dive_cpu > 0 then "populated"
+           else "not populated"
+       end index_dive_cpu,
+       case
+           when compilation_cpu > 0 then "populated"
+           else "not populated"
+       end compilation_cpu
+from (select concat(substring(sql_text, 1, 23), "...") as sql_text,
+               index_dive_count, index_dive_cpu, compilation_cpu
+          from information_schema.sql_statistics s, information_schema.sql_text t
+         where s.sql_id = t.sql_id
+           and sql_text not like 'SET%'
+           and sql_text not like '%round%') v;
+
+###########################################################
+### Case 19.2: Value of eq_range_index_dive_limit is 5
+###            4 index dives are expected
+###########################################################
+
+flush sql_statistics;
+
+--echo Case 19.2: eq_range_index_dive_limit=5
+SET eq_range_index_dive_limit=5;
+
+SET optimizer_trace="enabled=on,one_line=off";
+
+set global sql_stats_control=ON;
+
+set @trace_count = 0;
+
+# Index dive queries are performed only on predicates using a1 to a4 but
+# not on predicates using a5 to a10. Hence the index_dive_count is
+# (1+2+3+4) = 10
+select count(*)
+from idx_dive_tbl
+where idx_dive_tbl.a1  in (10)
+  and idx_dive_tbl.a2  in (10, 20)
+  and idx_dive_tbl.a3  in (10, 20, 30)
+  and idx_dive_tbl.a4  in (10, 20, 30, 40)
+  and idx_dive_tbl.a5  in (10, 20, 30, 40, 50)
+  and idx_dive_tbl.a6  in (10, 20, 30, 40, 50, 60)
+  and idx_dive_tbl.a7  in (10, 20, 30, 40, 50, 60, 70)
+  and idx_dive_tbl.a8  in (10, 20, 30, 40, 50, 60, 70, 80)
+  and idx_dive_tbl.a9  in (10, 20, 30, 40, 50, 60, 70, 80, 90)
+  and idx_dive_tbl.a10 in (10, 20, 30, 40, 50, 60, 70, 80, 90, 100);
+
+select round(length(trace)-
+             length(replace(trace, "\"index_dives_for_eq_ranges\": true", "")))
+               /length("\"index_dives_for_eq_ranges\": true") into @trace_count
+  from information_schema.optimizer_trace;
+
+set global sql_stats_control=OFF_SOFT;
+
+SET optimizer_trace="enabled=off";
+
+select sql_text, index_dive_count,
+       cast(@trace_count as UNSIGNED) as indexes_accessed_for_dive,
+       case
+            when index_dive_count = 10 then "Success"
+            else "Fail"
+       end as test_status,
+       case
+           when index_dive_cpu > 0 then "populated"
+           else "not populated"
+       end index_dive_cpu,
+       case
+           when compilation_cpu > 0 then "populated"
+           else "not populated"
+       end compilation_cpu
+  from (select concat(substring(sql_text, 1, 23), "...") as sql_text,
+               index_dive_count, index_dive_cpu, compilation_cpu
+          from information_schema.sql_statistics s, information_schema.sql_text t
+         where s.sql_id = t.sql_id
+           and sql_text not like 'SET%'
+           and sql_text not like '%round%') v;
+
+###########################################################
+### Case 19.3: Value of eq_range_index_dive_limit is 11
+###            10 index dives are expected
+###########################################################
+
+flush sql_statistics;
+
+--echo Case 19.3: eq_range_index_dive_limit=11
+SET eq_range_index_dive_limit=11;
+
+SET optimizer_trace="enabled=on,one_line=off";
+
+set global sql_stats_control=ON;
+
+set @trace_count = 0;
+
+# Index dive queries are performed on all the predicates.
+# Hence the index_dive_count is
+# (1+2+3+4+5+6+7+8+9+10) = 55
+select count(*)
+from idx_dive_tbl
+where idx_dive_tbl.a1  in (10)
+  and idx_dive_tbl.a2  in (10, 20)
+  and idx_dive_tbl.a3  in (10, 20, 30)
+  and idx_dive_tbl.a4  in (10, 20, 30, 40)
+  and idx_dive_tbl.a5  in (10, 20, 30, 40, 50)
+  and idx_dive_tbl.a6  in (10, 20, 30, 40, 50, 60)
+  and idx_dive_tbl.a7  in (10, 20, 30, 40, 50, 60, 70)
+  and idx_dive_tbl.a8  in (10, 20, 30, 40, 50, 60, 70, 80)
+  and idx_dive_tbl.a9  in (10, 20, 30, 40, 50, 60, 70, 80, 90)
+  and idx_dive_tbl.a10 in (10, 20, 30, 40, 50, 60, 70, 80, 90, 100);
+
+select round(length(trace)-
+             length(replace(trace, "\"index_dives_for_eq_ranges\": true", "")))
+               /length("\"index_dives_for_eq_ranges\": true") into @trace_count
+  from information_schema.optimizer_trace;
+
+set global sql_stats_control=OFF_SOFT;
+
+SET optimizer_trace="enabled=off";
+
+select sql_text, index_dive_count,
+       cast(@trace_count as UNSIGNED) as indexes_accessed_for_dive,
+       case
+            when index_dive_count = 55 then "Success"
+            else "Fail"
+       end as test_status,
+       case
+           when index_dive_cpu > 0 then "populated"
+           else "not populated"
+       end index_dive_cpu,
+       case
+           when compilation_cpu > 0 then "populated"
+           else "not populated"
+       end compilation_cpu
+  from (select concat(substring(sql_text, 1, 23), "...") as sql_text,
+               index_dive_count, index_dive_cpu, compilation_cpu
+          from information_schema.sql_statistics s, information_schema.sql_text t
+         where s.sql_id = t.sql_id
+           and sql_text not like 'SET%'
+           and sql_text not like '%round%') v;
+
+###########################################################
+### Case 19.4: Value of eq_range_index_dive_limit is 2
+###            Only 1 index dive is expected
+###########################################################
+
+flush sql_statistics;
+
+--echo Case 19.4: eq_range_index_dive_limit=2
+SET eq_range_index_dive_limit=2;
+
+SET optimizer_trace="enabled=on,one_line=off";
+
+set global sql_stats_control=ON;
+
+set @trace_count = 0;
+
+# Index dive queries are performed only on predicates using a1 but
+# not on predicates using a2 to a10. Hence the index_dive_count is
+# (1+2+3+4+5+6+7+8+9) = 1
+select count(*)
+from idx_dive_tbl
+where idx_dive_tbl.a1  in (10)
+  and idx_dive_tbl.a2  in (10, 20)
+  and idx_dive_tbl.a3  in (10, 20, 30)
+  and idx_dive_tbl.a4  in (10, 20, 30, 40)
+  and idx_dive_tbl.a5  in (10, 20, 30, 40, 50)
+  and idx_dive_tbl.a6  in (10, 20, 30, 40, 50, 60)
+  and idx_dive_tbl.a7  in (10, 20, 30, 40, 50, 60, 70)
+  and idx_dive_tbl.a8  in (10, 20, 30, 40, 50, 60, 70, 80)
+  and idx_dive_tbl.a9  in (10, 20, 30, 40, 50, 60, 70, 80, 90)
+  and idx_dive_tbl.a10 in (10, 20, 30, 40, 50, 60, 70, 80, 90, 100);
+
+select round(length(trace)-
+             length(replace(trace, "\"index_dives_for_eq_ranges\": true", "")))
+               /length("\"index_dives_for_eq_ranges\": true") into @trace_count
+  from information_schema.optimizer_trace;
+
+set global sql_stats_control=OFF_SOFT;
+
+SET optimizer_trace="enabled=off";
+
+select sql_text, index_dive_count,
+       cast(@trace_count as UNSIGNED) as indexes_accessed_for_dive,
+       case
+            when index_dive_count = 1 then "Success"
+            else "Fail"
+       end as test_status,
+       case
+           when index_dive_cpu > 0 then "populated"
+           else "not populated"
+       end index_dive_cpu,
+       case
+           when compilation_cpu > 0 then "populated"
+           else "not populated"
+       end compilation_cpu
+  from (select concat(substring(sql_text, 1, 23), "...") as sql_text,
+               index_dive_count, index_dive_cpu, compilation_cpu
+          from information_schema.sql_statistics s, information_schema.sql_text t
+         where s.sql_id = t.sql_id
+           and sql_text not like 'SET%'
+           and sql_text not like '%round%') v;
+
+###########################################################
+### Case 19.5: Value of eq_range_index_dive_limit is 7
+###            6 index dives are expected
+###########################################################
+
+flush sql_statistics;
+
+--echo Case 19.5: eq_range_index_dive_limit=7
+SET eq_range_index_dive_limit=7;
+
+SET optimizer_trace="enabled=on,one_line=off";
+
+set global sql_stats_control=ON;
+
+set @trace_count = 0;
+
+# Index dive queries are performed only on predicates using a1 to a6 but
+# not on predicates using a7 to a10. Hence the index_dive_count is
+# (1+2+3+4+5+6) = 21
+select count(*)
+from idx_dive_tbl
+where idx_dive_tbl.a1  in (10)
+  and idx_dive_tbl.a2  in (10, 20)
+  and idx_dive_tbl.a3  in (10, 20, 30)
+  and idx_dive_tbl.a4  in (10, 20, 30, 40)
+  and idx_dive_tbl.a5  in (10, 20, 30, 40, 50)
+  and idx_dive_tbl.a6  in (10, 20, 30, 40, 50, 60)
+  and idx_dive_tbl.a7  in (10, 20, 30, 40, 50, 60, 70)
+  and idx_dive_tbl.a8  in (10, 20, 30, 40, 50, 60, 70, 80)
+  and idx_dive_tbl.a9  in (10, 20, 30, 40, 50, 60, 70, 80, 90)
+  and idx_dive_tbl.a10 in (10, 20, 30, 40, 50, 60, 70, 80, 90, 100);
+
+select round(length(trace)-
+             length(replace(trace, "\"index_dives_for_eq_ranges\": true", "")))
+               /length("\"index_dives_for_eq_ranges\": true") into @trace_count
+  from information_schema.optimizer_trace;
+
+set global sql_stats_control=OFF_SOFT;
+
+SET optimizer_trace="enabled=off";
+
+select sql_text, index_dive_count,
+       cast(@trace_count as UNSIGNED) as indexes_accessed_for_dive,
+       case
+            when index_dive_count = 21 then "Success"
+            else "Fail"
+       end as test_status,
+       case
+           when index_dive_cpu > 0 then "populated"
+           else "not populated"
+       end index_dive_cpu,
+       case
+           when compilation_cpu > 0 then "populated"
+           else "not populated"
+       end compilation_cpu
+  from (select concat(substring(sql_text, 1, 23), "...") as sql_text,
+               index_dive_count, index_dive_cpu, compilation_cpu
+          from information_schema.sql_statistics s, information_schema.sql_text t
+         where s.sql_id = t.sql_id
+           and sql_text not like 'SET%'
+           and sql_text not like '%round%') v;
+
+###########################################################
+### Case 19.6: Multiple statement test for index_dive_count
+###            and index_dive_cpu
+###########################################################
+
+flush sql_statistics;
+
+--echo Case 19.6: eq_range_index_dive_limit=11
+SET eq_range_index_dive_limit=11;
+
+set global sql_stats_control=ON;
+
+delimiter ||||;
+
+select count(*)
+from idx_dive_tbl
+where idx_dive_tbl.a1  in (10);
+
+select count(*)
+from idx_dive_tbl
+where idx_dive_tbl.a1  in (10)
+  and idx_dive_tbl.a2  in (10, 20);
+
+select count(*)
+from idx_dive_tbl
+where idx_dive_tbl.a1  in (10)
+  and idx_dive_tbl.a2  in (10, 20)
+  and idx_dive_tbl.a3  in (10, 20, 30);
+
+select count(*)
+from idx_dive_tbl
+where idx_dive_tbl.a1  in (10)
+  and idx_dive_tbl.a2  in (10, 20)
+  and idx_dive_tbl.a3  in (10, 20, 30)
+  and idx_dive_tbl.a4  in (10, 20, 30, 40);
+
+select count(*)
+from idx_dive_tbl
+where idx_dive_tbl.a1  in (10)
+  and idx_dive_tbl.a2  in (10, 20)
+  and idx_dive_tbl.a3  in (10, 20, 30)
+  and idx_dive_tbl.a4  in (10, 20, 30, 40)
+  and idx_dive_tbl.a5  in (10, 20, 30, 40, 50);
+
+select count(*)
+from idx_dive_tbl
+where idx_dive_tbl.a1  in (10)
+  and idx_dive_tbl.a2  in (10, 20)
+  and idx_dive_tbl.a3  in (10, 20, 30)
+  and idx_dive_tbl.a4  in (10, 20, 30, 40)
+  and idx_dive_tbl.a5  in (10, 20, 30, 40, 50)
+  and idx_dive_tbl.a6  in (10, 20, 30, 40, 50, 60);
+
+select count(*)
+from idx_dive_tbl
+where idx_dive_tbl.a1  in (10)
+  and idx_dive_tbl.a2  in (10, 20)
+  and idx_dive_tbl.a3  in (10, 20, 30)
+  and idx_dive_tbl.a4  in (10, 20, 30, 40)
+  and idx_dive_tbl.a5  in (10, 20, 30, 40, 50)
+  and idx_dive_tbl.a6  in (10, 20, 30, 40, 50, 60)
+  and idx_dive_tbl.a7  in (10, 20, 30, 40, 50, 60, 70);
+
+select count(*)
+from idx_dive_tbl
+where idx_dive_tbl.a1  in (10)
+  and idx_dive_tbl.a2  in (10, 20)
+  and idx_dive_tbl.a3  in (10, 20, 30)
+  and idx_dive_tbl.a4  in (10, 20, 30, 40)
+  and idx_dive_tbl.a5  in (10, 20, 30, 40, 50)
+  and idx_dive_tbl.a6  in (10, 20, 30, 40, 50, 60)
+  and idx_dive_tbl.a7  in (10, 20, 30, 40, 50, 60, 70)
+  and idx_dive_tbl.a8  in (10, 20, 30, 40, 50, 60, 70, 80);
+
+select count(*)
+from idx_dive_tbl
+where idx_dive_tbl.a1  in (10)
+  and idx_dive_tbl.a2  in (10, 20)
+  and idx_dive_tbl.a3  in (10, 20, 30)
+  and idx_dive_tbl.a4  in (10, 20, 30, 40)
+  and idx_dive_tbl.a5  in (10, 20, 30, 40, 50)
+  and idx_dive_tbl.a6  in (10, 20, 30, 40, 50, 60)
+  and idx_dive_tbl.a7  in (10, 20, 30, 40, 50, 60, 70)
+  and idx_dive_tbl.a8  in (10, 20, 30, 40, 50, 60, 70, 80)
+  and idx_dive_tbl.a9  in (10, 20, 30, 40, 50, 60, 70, 80, 90);
+
+select count(*)
+from idx_dive_tbl
+where idx_dive_tbl.a1  in (10)
+  and idx_dive_tbl.a2  in (10, 20)
+  and idx_dive_tbl.a3  in (10, 20, 30)
+  and idx_dive_tbl.a4  in (10, 20, 30, 40)
+  and idx_dive_tbl.a5  in (10, 20, 30, 40, 50)
+  and idx_dive_tbl.a6  in (10, 20, 30, 40, 50, 60)
+  and idx_dive_tbl.a7  in (10, 20, 30, 40, 50, 60, 70)
+  and idx_dive_tbl.a8  in (10, 20, 30, 40, 50, 60, 70, 80)
+  and idx_dive_tbl.a9  in (10, 20, 30, 40, 50, 60, 70, 80, 90)
+  and idx_dive_tbl.a10 in (10, 20, 30, 40, 50, 60, 70, 80, 90, 100);
+||||
+
+select concat(substring(sql_text, 1, 23), "...") as sql_text,
+       length(sql_text) sql_text_len,
+       index_dive_count,
+       case
+           when index_dive_cpu > 0 then "populated"
+           else "not populated"
+       end index_dive_cpu,
+       case
+           when compilation_cpu > 0 then "populated"
+           else "not populated"
+       end compilation_cpu
+  from information_schema.sql_statistics s, information_schema.sql_text t
+ where s.sql_id = t.sql_id
+order by 1,2,3,4||||
+
+# reset delimiter
+delimiter ;||||
+
+### Case 19: Cleanup
+
+drop table idx_dive_tbl;
+drop procedure populate;
+
+###########
+### Cleanup
+###########
+--echo Cleanup
+connection default;
+set @@GLOBAL.sql_stats_control="OFF_HARD";
+set @@GLOBAL.sql_plans_control=OFF_HARD;
+set @@GLOBAL.max_digest_sample_age=-1;
+drop table t1;
+drop user user_super@localhost;
+disconnect con13;
+
+--source include/wait_until_count_sessions.inc

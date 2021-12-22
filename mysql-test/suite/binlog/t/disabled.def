@@ -1,0 +1,12 @@
+##############################################################################
+#
+#  List the test cases that are to be disabled temporarily.
+#
+#  Separate the test case name and the comment with ':'.
+#
+#    <testcasename> : BUG#<xxxx> <date disabled> <disabler> <comment>
+#
+#  Do not use any TAB characters for whitespace.
+#
+##############################################################################
+binlog_server_start_options : BUG#XXXXXXXX 2013-04-19 jtolmer Dangerous rmtree calls!

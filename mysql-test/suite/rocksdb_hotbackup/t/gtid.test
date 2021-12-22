@@ -1,0 +1,48 @@
+
+source suite/rocksdb_hotbackup/include/setup.inc;
+
+--let $rpl_server_number= 2
+--source include/rpl_stop_server.inc
+
+--exec suite/rocksdb_hotbackup/include/load_data_and_run.sh 2>&1
+
+# The binlogs are also copied, but roll forward after recovery will
+# does not update the storage engine's binlog offset and gtid, so
+# truncate the binlog to prevent this.
+--exec truncate -s 147 $MYSQLTEST_VARDIR/mysqld.2/data/mysqld-bin.0*
+
+--let $rpl_server_number= 2
+--source include/rpl_start_server.inc
+
+connection server_2;
+let $num_rows = `select count(*) from db1.t1`;
+
+if($num_rows < 250000) {
+  echo Number of rows($num_rows) is less than 250000;
+}
+if($num_rows > 500000) {
+  echo Number of rows($num_rows) is more than 500000;
+}
+
+--source suite/rocksdb_hotbackup/include/setup_replication_gtid_and_sync.inc
+
+connection server_2;
+select count(*) from db1.t1;
+
+connection server_1;
+let $checksum1 = `checksum tables db1.t1`;
+connection server_2;
+let $checksum2 = `checksum tables db1.t1`;
+
+if($checksum1 != $checksum2) {
+  echo Checksums ($checksum1 and $checksum2) do not match;
+}
+
+connection server_1;
+drop database db1;
+sync_slave_with_master;
+connection server_2;
+stop slave;
+reset slave;
+
+source suite/rocksdb_hotbackup/include/cleanup.inc;

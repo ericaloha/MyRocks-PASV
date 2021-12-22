@@ -1,0 +1,331 @@
+--source include/master-slave.inc
+connection master;
+
+###
+### Test of document path indexing of document type
+###
+
+--disable_warnings
+drop table if exists t1, t2, t3, t4;
+--enable_warnings
+
+
+################################################################################
+###
+### t1 : only one index key with only one document path key part
+###
+
+
+## Indexing on a document field directly is not allowed
+--error ER_DOCUMENT_KEY_NOT_SUPPORTED
+CREATE TABLE t1 (
+       a int not null,
+       doc document,
+       primary key (a),
+       key (doc)) engine=innodb;
+
+## Specified key was too long
+let $big_string = `SELECT REPEAT('.a', 2000)`;
+--error ER_TOO_LONG_DOCUMENT_PATH_INDEX
+eval CREATE TABLE t1 (
+       a int primary key,
+       b blob not null,
+       doc document,
+       key(doc$big_string as string(100))) engine=innodb;
+
+
+## The prefix length must be specified when indexing on a document path as string
+--error 1064
+CREATE TABLE t1 (
+       a int not null,
+       b char (10) not null,
+       doc document,
+       primary key (a),
+       key (doc.id as int),
+       key (doc.name as string)) engine=innodb;
+
+
+## The index type 'binary' is not supported
+--error 1064
+CREATE TABLE t1 (
+       a int not null,
+       b char (10) not null,
+       doc document,
+       primary key (a),
+       key (doc.id as int),
+       key (doc.address as binary)) engine=innodb;
+
+## The index type 'binary' is not supported
+--error 1064
+CREATE TABLE t1 (
+       a int not null,
+       b char (10) not null,
+       doc document,
+       primary key (a),
+       key (doc.id as int),
+       key (doc.address as binary(100))) engine=innodb;
+
+### Only one index key with only one document path key part
+CREATE TABLE t1 (
+       a int not null,
+       b int,
+       c char (10),
+       doc document,
+       primary key (a),
+       UNIQUE key b_a (b, a),
+       UNIQUE key c_doc (c, doc.address.zipcode as int)
+) engine=innodb;
+
+SHOW CREATE TABLE t1;
+
+select substr(document_path from 1 for 7), substr(document_path from 9), document_type from information_schema.innodb_sys_docstore_fields;
+
+--replace_column 7 -
+SHOW INDEXES IN t1;
+
+insert into t1 values (1,10,'@1','{ "id":101, "name":"Alex", "phone":6507770001, "address":{ "houseNumber":1001, "streetName":"1st", "zipcode":98761 }, "bool":"True", "a.b.c.":1 }');
+insert into t1 values (2,20,'@2','{ "id":102, "name":"Bob", "phone":6507770002, "address":{ "houseNumber":1002, "streetName":"2nd", "zipcode":98762 }, "int64":2222222220123456789, "a.b.c.":2 }');
+insert into t1 values (3,30,'@3','{ "id":103, "name":"Charlie", "phone":6507770003, "address":{ "houseNumber":1003, "streetName":"3rd", "zipcode":98763 }, "double":3.333333, "a.b.c.":3 }');
+insert into t1 values (4,40,'@4','{ "id":104, "name":"Don", "phone":6507770004, "address":{ "houseNumber":1004, "streetName":"4th", "zipcode":98764 }, "Children":["Alex", "Bob", "Charlei"], "a.b.c.":4 }');
+
+insert into t1 values (5,50,'@5','{ "id":105, "name":"Eddard", "phone":6507770005, "address":{ "houseNumber":1005, "streetName":"5th", "zipcode":98765 }, "Children":["Rob", "Sansa", "Arya"], "a.b.c.":5 }');
+
+# Duplicate entry for c_doc.address.zipcode
+--error ER_DUP_ENTRY
+insert into t1 values (6,60,'@5','{ "address":{ "zipcode":98765 } }');
+# Duplicate c_doc.address.zipcode due to string conversion
+--error ER_DUP_ENTRY
+insert into t1 values (6,60,'@5','{ "address":{ "zipcode":"98765" } }');
+# Duplicate c_doc.address.zipcode due to double conversion
+--error ER_DUP_ENTRY
+insert into t1 values (6,60,'@5','{ "address":{ "zipcode":98765.0 } }');
+
+update t1 set doc='{ "id":105, "name":"Eddard", "phone":6507770005, "address":{ "houseNumber":1005, "streetName":"5th", "zipcode":98766 }, "Children":["Rob", "Sansa", "Arya"], "a.b.c.":5 }' where a = 5;
+# Duplicate entry for c_doc.address.zipcode becuase of the previous update
+--error ER_DUP_ENTRY
+insert into t1 values (6,60,'@5','{ "address":{ "zipcode":98766 } }');
+delete from t1 where a = 5;
+
+--replace_column 7 -
+SHOW INDEXES IN t1;
+
+SELECT * FROM t1;
+
+ALTER TABLE t1 DROP KEY b_a;
+
+--replace_column 7 -
+SHOW INDEXES IN t1;
+
+SELECT * FROM t1;
+
+ALTER TABLE t1 DROP KEY c_doc;
+
+--replace_column 7 -
+SHOW INDEXES IN t1;
+
+SELECT * FROM t1;
+
+
+################################################################################
+###
+### t2 : multiple keys each of which has only one document path key part
+###
+
+
+CREATE TABLE t2 (
+       a int not null,
+       b char (10) not null,
+       doc document,
+       primary key (a),
+       key (doc.id as int),
+       UNIQUE key doc_double (doc.double as double),
+       UNIQUE key doc_bool (doc.bool as bool),
+       UNIQUE key doc_name (doc.name as string(64)),
+       key doc_name_100 (doc.name as string(100)),
+       UNIQUE key doc_address_streetName (doc.address.streetName as string(64)),
+       key (doc.address.streetName as string(100))) engine=innodb;
+
+SHOW CREATE TABLE t2;
+--replace_column 7 -
+SHOW INDEXES IN t2;
+
+insert into t2 values (1,'@1','{ "id":101, "name":"Alex", "phone":6507770001, "address":{ "houseNumber":1001, "streetName":"1st", "zipcode":98761 }, "bool":"True" }');
+insert into t2 values (2,'@2','{ "id":102, "name":"Bob", "phone":6507770002, "address":{ "houseNumber":1002, "streetName":"2nd", "zipcode":98762 }, "int64":2222222220123456789 }');
+insert into t2 values (3,'@3','{ "id":103, "name":"Charlie", "phone":6507770003, "address":{ "houseNumber":1003, "streetName":"3rd", "zipcode":98763 }, "double":3.333333 }');
+insert into t2 values (4,'@4','{ "id":104, "name":"Don", "phone":6507770004, "address":{ "houseNumber":1004, "streetName":"4th", "zipcode":98764 }, "Children":["Alex", "Bob", "Charlei"] }');
+
+insert into t2 values (5,'@5','{ "id":105, "name":"Eddard", "phone":6507770005, "address":{ "houseNumber":1005, "streetName":"5th", "zipcode":98765 }, "Children":["Rob", "Sansa", "Arya"], "a.b.c.":5 }');
+
+# Duplicate entry for doc.double
+--error ER_DUP_ENTRY
+insert into t2 values (6,'@6','{ "double":3.333333 }');
+# implicit string to double conversion
+--error ER_DUP_ENTRY
+insert into t2 values (6,'@6','{ "double":"3.333333" }');
+# string will be truncated due to max precision
+insert into t2 values (6,'@6','{ "double":"1.2345678901234567456" }');
+# the conversion is within max precision
+insert into t2 values (7,'@7','{ "double":"1.234567890123456" }');
+--error ER_DUP_ENTRY
+# now this will cause duplicate index insertion due to truncation
+# although the strings values are different
+insert into t2 values (8,'@8','{ "double":"1.2345678901234567123" }');
+delete from t2 where a = 6 or a = 7;
+
+# Duplicate entry for doc.name
+--error ER_DUP_ENTRY
+insert into t2 values (6,'@6','{ "name":"Eddard" }');
+
+# Duplicate entry for doc.address.streetName
+--error ER_DUP_ENTRY
+insert into t2 values (6,'@6','{ "address":{ "houseNumber":1005, "streetName":"4th", "zipcode":98765 } }');
+
+update t2 set doc='{ "id":105, "name":"Ned", "phone":6507770005, "address":{ "houseNumber":1005, "streetName":"Winterfell", "zipcode":98766 }, "Children":["Rob", "Sansa", "Arya"], "a.b.c.":5 }' where a = 5;
+# Duplicate entry for doc.address because of previous update
+--error ER_DUP_ENTRY
+insert into t2 values (6,'@6','{ "address":{ "houseNumber":1005, "streetName":"Winterfell", "zipcode":98766 } }');
+
+# int value for a double type index
+insert into t2 values(7,'@7','{ "double" : 123}');
+--error ER_DUP_ENTRY
+insert into t2 values(8, '@8','{ "double" : 123.0}');
+
+# int value for string type index
+insert into t2 values(8,'@8','{ "name" : 123}');
+--error ER_DUP_ENTRY
+insert into t2 values(9, '@9','{ "name" : "123"}');
+
+# double value for string type index
+insert into t2 values(9,'@9','{ "name" : 123.1231131232}');
+--error ER_DUP_ENTRY
+insert into t2 values(10, '@10','{ "name" : "123.1231131232"}');
+
+# doubles are converted into a string with 16 significant digits
+insert into t2 values (10,'@10','{ "name":1.234567890123456 }');
+insert into t2 values (11,'@11','{ "name":1.234567890123455 }');
+--error ER_DUP_ENTRY
+# double will be truncated when converting to string
+insert into t2 values (12,'@12','{ "name":1.234567890123456123 }');
+# Another case of trunction (carry over), so this is a success.
+insert into t2 values (12,'@12','{ "name":1.234567890123456999 }');
+delete from t2 where a = 10 or a = 11 or a = 12;
+
+# Duplicate entry for doc_bool
+--error ER_DUP_ENTRY
+insert into t2 values(10,'@10','{ "bool" : true}');
+--error ER_DUP_ENTRY
+insert into t2 values(10,'@10','{ "bool" : 1}');
+--error ER_DUP_ENTRY
+insert into t2 values(10,'@10','{ "bool" : 1.0}');
+--error ER_DUP_ENTRY
+insert into t2 values(10,'@10','{ "bool" : 123}');
+--error ER_DUP_ENTRY
+insert into t2 values(10,'@10','{ "bool" : 123.4}');
+
+insert into t2 values(10,'@10','{ "bool" : false}');
+--error ER_DUP_ENTRY
+insert into t2 values(10,'@10','{ "bool" : "false"}');
+--error ER_DUP_ENTRY
+insert into t2 values(10,'@10','{ "bool" : 0}');
+
+delete from t2 where a = 5;
+
+--replace_column 7 -
+SHOW INDEXES IN t2;
+
+ALTER TABLE t2 DROP KEY doc_bool;
+
+--replace_column 7 -
+SHOW INDEXES IN t2;
+
+ALTER TABLE t2 DROP KEY doc_name_100;
+
+--replace_column 7 -
+SHOW INDEXES IN t2;
+
+ALTER TABLE t2 DROP KEY doc_address_streetName;
+
+--replace_column 7 -
+SHOW INDEXES IN t2;
+
+
+################################################################################
+###
+### t3 : create an index with only one document path key part on an existing table
+###
+
+
+CREATE TABLE t3 (
+       a int not null,
+       b int,
+       c char (10),
+       doc document,
+       primary key (a),
+       UNIQUE key b_a (b, a)
+) engine=innodb;
+SHOW CREATE TABLE t3;
+
+--replace_column 7 -
+SHOW INDEXES IN t3;
+
+insert into t3 values (1,10,'@1','{ "id":101, "name":"Alex", "phone":6507770001, "address":{ "houseNumber":1001, "streetName":"1st", "zipcode":98761 }, "bool":"True", "a.b.c.":1 }');
+insert into t3 values (2,20,'@2','{ "id":102, "name":"Bob", "phone":6507770002, "address":{ "houseNumber":1002, "streetName":"2nd", "zipcode":98762 }, "int64":2222222220123456789, "a.b.c.":2 }');
+insert into t3 values (3,30,'@3','{ "id":103, "name":"Charlie", "phone":6507770003, "address":{ "houseNumber":1003, "streetName":"3rd", "zipcode":98763 }, "double":3.333333, "a.b.c.":3 }');
+insert into t3 values (4,40,'@4','{ "id":104, "name":"Don", "phone":6507770004, "address":{ "houseNumber":1004, "streetName":"4th", "zipcode":98764 }, "Children":["Alex", "Bob", "Charlei"], "a.b.c.":4 }');
+
+SELECT * FROM t3;
+
+# Verify online DDL is compatible with creating index on document path keys
+ALTER TABLE t3 ADD UNIQUE INDEX c_doc (c, doc.address.zipcode as int);
+
+# Duplicate entry for c_doc.address.zipcode
+--error ER_DUP_ENTRY
+insert into t3 values (5,50,'@4','{ "address":{ "zipcode":98764 } }');
+
+--replace_column 7 -
+SHOW INDEXES IN t3;
+
+SELECT * FROM t3;
+
+ALTER TABLE t3 DROP KEY b_a;
+
+--replace_column 7 -
+SHOW INDEXES IN t3;
+
+ALTER TABLE t3 DROP KEY c_doc;
+
+--replace_column 7 -
+SHOW INDEXES IN t3;
+
+SELECT * FROM t3;
+
+
+################################################################################
+###
+### TODO:
+###
+### t4 : multiple keys each of which has multiple document path key parts
+###
+
+
+--error ER_DUP_FIELDNAME
+CREATE TABLE t4 (
+       a int not null,
+       b char (10) not null,
+       doc document,
+       primary key (a),
+       key id_a_double_b_bool (doc.id as int, a, doc.double as double, b, doc.bool as bool),
+       key a_name_b_name100_address_a_address100_b (a, doc.name as string(64), b, doc.name as string(100), doc.address as string(64), a, doc.address as string(100), b)) engine=innodb;
+
+
+################################################################################
+###
+### clean up
+###
+
+
+drop table t1, t2, t3;
+
+select document_path, document_type from information_schema.innodb_sys_docstore_fields;
+
+--source include/rpl_end.inc

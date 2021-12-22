@@ -1,0 +1,28 @@
+# Don't run this test with --rpc_protocol because that mode adds other query
+# attributes (rpc_role/rpc_db) which make the output not match
+--source include/not_rpc_protocol.inc
+
+create database db1;
+use db1;
+
+connect (con,localhost,root,,db1);
+
+query_attrs_add a b;
+select attr_name, attr_value from information_schema.query_attributes where id = connection_id();
+
+query_attrs_add b a;
+select attr_name, attr_value from information_schema.query_attributes where id = connection_id();
+
+connection default;
+select attr_name, attr_value from information_schema.query_attributes where id = connection_id();
+
+connection con;
+query_attrs_delete a;
+select attr_name, attr_value from information_schema.query_attributes where id = connection_id();
+
+query_attrs_reset;
+select attr_name, attr_value from information_schema.query_attributes where id = connection_id();
+
+connection default;
+
+drop database db1;

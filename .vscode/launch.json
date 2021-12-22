@@ -1,0 +1,23 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug",
+            "program": "/usr/local/mysql/bin/mysqld",
+            //"program": "/usr/local/mysql/scripts/mysql_install_db",
+            //"args": ["--defaults-file=/usr/local/mysql/my.cnf", "--user=root", "--basedir=/usr/local/mysql", "--datadir=/home/hkc/data1", "--rocksdb-flush-log-at-trx-commit=0", "--rocksdb-write-disable-wal=0","--skip-rocksdb-enable-2pc=1",
+                "args": ["--defaults-file=/usr/local/mysql/my.cnf", "--user=root", "--basedir=/usr/local/mysql", "--datadir=/home/hkc/data1", "--skip-rocksdb-enable-2pc=1",
+            //"args": ["--defaults-file=/usr/local/mysql/my.cnf", "--user=root", "--basedir=/usr/local/mysql", "--datadir=/home/hkc/data1","--skip-rocksdb-enable-2pc=1",
+                //"args": ["--defaults-file=/usr/local/mysql/my.cnf", "--user=root", "--basedir=/usr/local/mysql", "--datadir=/home/hkc/data2","--skip-rocksdb-enable-2pc=1",
+            ],
+            
+            "expressions": "native"
+        }
+    ]
+}

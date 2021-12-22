@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<wc-entries
+   xmlns="svn:">
+<entry
+   committed-rev="815"
+   name=""
+   committed-date="2008-12-10T04:37:18.252265Z"
+   url="http://srvengcm1.calpont.com/svn/genii/doc/sw/Iteration%2017%20Design%20Docs/Iteration%2017%20Queries/Deferred"
+   last-author="wweeks"
+   kind="dir"
+   repos="http://srvengcm1.calpont.com/svn/genii/doc/sw"
+   revision="832"/>
+<entry
+   committed-rev="815"
+   name="q4.3.1.sql"
+   text-time="2008-12-01T02:07:22.000000Z"
+   committed-date="2008-12-10T04:37:18.252265Z"
+   checksum="b4e3260fb93b334c553ffe7b2a8e122f"
+   last-author="wweeks"
+   kind="file"/>
+<entry
+   committed-rev="815"
+   name="q4.3.2.sql"
+   text-time="2008-12-01T02:07:22.000000Z"
+   committed-date="2008-12-10T04:37:18.252265Z"
+   checksum="71e27bef71ab3819f64b1144b34383ac"
+   last-author="wweeks"
+   kind="file"/>
+<entry
+   committed-rev="815"
+   name="q4.4.1.sql"
+   text-time="2008-12-01T02:07:22.000000Z"
+   committed-date="2008-12-10T04:37:18.252265Z"
+   checksum="ff64d4de5312884402f293e671716b3b"
+   last-author="wweeks"
+   kind="file"/>
+<entry
+   committed-rev="815"
+   name="q4.3.3.sql"
+   text-time="2008-12-01T02:07:22.000000Z"
+   committed-date="2008-12-10T04:37:18.252265Z"
+   checksum="ad3b02cb358bc4d77f62c754fb18a9d9"
+   last-author="wweeks"
+   kind="file"/>
+<entry
+   committed-rev="815"
+   name="q4.4.2.sql"
+   text-time="2008-12-01T02:07:22.000000Z"
+   committed-date="2008-12-10T04:37:18.252265Z"
+   checksum="490cd5c8896fd41ee8b253d4cce62bbd"
+   last-author="wweeks"
+   kind="file"/>
+<entry
+   committed-rev="815"
+   name="q5.1.1.original.sql"
+   text-time="2008-12-01T02:07:22.000000Z"
+   committed-date="2008-12-10T04:37:18.252265Z"
+   checksum="0102340a7d0f158cb121b91062be7d00"
+   last-author="wweeks"
+   kind="file"/>
+<entry
+   committed-rev="815"
+   name="q4.3.4.sql"
+   text-time="2008-12-01T02:07:22.000000Z"
+   committed-date="2008-12-10T04:37:18.252265Z"
+   checksum="fd836741e8776dfd792ce4093ed58ce6"
+   last-author="wweeks"
+   kind="file"/>
+<entry
+   committed-rev="815"
+   name="q4.4.3.sql"
+   text-time="2008-12-01T02:07:22.000000Z"
+   committed-date="2008-12-10T04:37:18.252265Z"
+   checksum="6883759246259cf4b48789d06dd7a57c"
+   last-author="wweeks"
+   kind="file"/>
+<entry
+   committed-rev="815"
+   name="q4.5.sql"
+   text-time="2008-12-01T02:07:22.000000Z"
+   committed-date="2008-12-10T04:37:18.252265Z"
+   checksum="c47548f96f44992580ab1cbf79be2a6e"
+   last-author="wweeks"
+   kind="file"/>
+<entry
+   committed-rev="815"
+   name="q4.4.4.sql"
+   text-time="2008-12-01T02:07:22.000000Z"
+   committed-date="2008-12-10T04:37:18.252265Z"
+   checksum="32cdeb77461d046cf06ef3a760656bb7"
+   last-author="wweeks"
+   kind="file"/>
+<entry
+   committed-rev="815"
+   name="q4.7.1.sql"
+   text-time="2008-12-01T02:07:22.000000Z"
+   committed-date="2008-12-10T04:37:18.252265Z"
+   checksum="277c7287f9b8783efe2a6ac5e1850ec8"
+   last-author="wweeks"
+   kind="file"/>
+<entry
+   committed-rev="815"
+   name="q5.3.1.original.sql"
+   text-time="2008-12-10T04:02:53.236131Z"
+   committed-date="2008-12-10T04:37:18.252265Z"
+   checksum="7a61b80355c06d260e0cdeddb174b9a2"
+   last-author="wweeks"
+   kind="file"/>
+<entry
+   committed-rev="815"
+   name="q4.7.2.sql"
+   text-time="2008-12-01T02:07:22.000000Z"
+   committed-date="2008-12-10T04:37:18.252265Z"
+   checksum="10191f658977a027b127497114b8b872"
+   last-author="wweeks"
+   kind="file"/>
+<entry
+   committed-rev="815"
+   name="q5.4.1.original.sql"
+   text-time="2008-12-10T04:07:59.841582Z"
+   committed-date="2008-12-10T04:37:18.252265Z"
+   checksum="6f4ff2618d7959df01f6fcdff0611b64"
+   last-author="wweeks"
+   kind="file"/>
+</wc-entries>

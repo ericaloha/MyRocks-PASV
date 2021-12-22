@@ -1,0 +1,1728 @@
+--source include/have_innodb.inc
+--source include/have_innodb_16k.inc
+--source include/master-slave.inc
+connection master;
+
+############################################################################
+###
+### Create and populate tables
+###
+
+--source suite/json/include/type_document_path_optimizer.inc
+
+
+################################################################################
+###
+### To verify: innodb_prefix_index_cluster_optimization is skipped for document type
+###
+
+--echo innodb_prefix_index_cluster_optimization is skipped for document type
+
+--disable_warnings
+drop table if exists t_innodb_prefix_index_cluster_opt;
+--enable_warnings
+
+create table t_prefix_index_cluster_opt(
+  id int auto_increment primary key,
+  doc document,
+  key msg_i(doc.msg_prefix as string(255)))
+engine=innodb;
+
+insert into t_prefix_index_cluster_opt(id, doc) values
+(NULL, '{"msg_prefix":"w56AfFK", "msg":"w56AfFK", "msg_length":7}');
+
+set @my_prefix_index_cluster_opt = @@global.innodb_prefix_index_cluster_optimization;
+set global innodb_prefix_index_cluster_optimization = true;
+
+select id, doc.msg_prefix from t_prefix_index_cluster_opt use document keys where doc.msg_prefix = 'w56AfFK';
+
+set global innodb_prefix_index_cluster_optimization = @my_prefix_index_cluster_opt;
+
+drop table t_prefix_index_cluster_opt;
+
+
+################################################################################
+###
+### NULL values with / without document indexes
+###
+
+# document column
+select a1 from t1 where doc11 is null;
+select a1 from t1 where doc11 is not null;
+
+select a1 from t1 use document keys where doc11 is null;
+select a1 from t1 use document keys where doc11 is not null;
+
+# bool
+--echo FIXME!! This isn't necessarily a bug but it is confusing!
+--echo The results of "is [not] null" with / without document key enabled can
+--echo be different. The reason is that, with document keys disabled, there are
+--echo no type for `doc11`.`bool` so as long as the document path exists and
+--echo its value is not null, it will be treated as not null. But when document
+--echo kyes are enabled, document path `doc11`.`bool` may pick up a type from
+--echo document keys, e.g. Boolean type, and the document path values will be
+--echo retrieved from that index instead of the original document, so even the
+--echo value of the document path is not null in the document but it still can
+--echo be null as Boolean type in index. e.g. {"bool":"key as bool will be null"},
+--echo so different results will be observed with the same query.
+
+explain extended select a1 from t1 where doc11.bool is null;
+select a1 from t1 where doc11.bool is null;
+select a1 from t1 where doc11.bool is not null;
+
+explain extended select a1 from t1 use document keys where doc11.bool is null;
+select a1 from t1 use document keys where doc11.bool is null;
+select a1 from t1 use document keys where doc11.bool is not null;
+
+# int
+select a1 from t1 where doc11.int is null;
+select a1 from t1 where doc11.int is not null;
+
+select a1 from t1 use document keys where doc11.int is null;
+select a1 from t1 use document keys where doc11.int is not null;
+
+# double
+select a1 from t1 where doc11.double is null;
+select a1 from t1 where doc11.double is not null;
+
+select a1 from t1 use document keys where doc11.double is null;
+select a1 from t1 use document keys where doc11.double is not null;
+
+# string
+select a1 from t1 where doc11.string is null;
+select a1 from t1 where doc11.string is not null;
+
+select a1 from t1 use document keys where doc11.string is null;
+select a1 from t1 use document keys where doc11.string is not null;
+
+
+################################################################################
+###
+### Single-table Queries
+###
+
+##
+## bool index type
+##
+
+#
+# bool: covering index
+#
+
+explain extended select a1 from t1 where doc11.bool is true;
+select a1 from t1 where doc11.bool is true;
+
+explain extended select a1 from t1 where doc11.bool is false;
+select a1 from t1 where doc11.bool is false;
+
+explain extended select a1 from t1 use document keys where doc11.bool is true;
+select a1 from t1 use document keys where doc11.bool is true;
+
+--echo FIXME!! (this isn't necessarily a bug): different results with / without indexes
+explain extended select a1 from t1 use document keys where doc11.bool is false;
+select a1 from t1 use document keys where doc11.bool is false;
+
+#
+# bool: covering index for range queries
+#
+
+explain extended select t1.doc11.bool from t1 use document keys where t1.doc11.bool > 0;
+select t1.doc11.bool from t1 use document keys where t1.doc11.bool > 0;
+
+explain extended select t1.doc11.bool from t1 use document keys where t1.doc11.bool < 1;
+select t1.doc11.bool from t1 use document keys where t1.doc11.bool < 1;
+
+explain extended select t1.doc11.bool from t1 use document keys where t1.doc11.bool > 0 and t1.doc11.bool < 1;
+select t1.doc11.bool from t1 use document keys where t1.doc11.bool > 0 and t1.doc11.bool < 1;
+
+explain extended select t1.doc11.bool from t1 use document keys where t1.doc11.bool >= 0;
+select t1.doc11.bool from t1 use document keys where t1.doc11.bool >= 0;
+
+explain extended select t1.doc11.bool from t1 use document keys where t1.doc11.bool > 0 and t1.doc11.bool <= 1;
+select t1.doc11.bool from t1 use document keys where t1.doc11.bool > 0 and t1.doc11.bool <= 1;
+
+explain extended select t1.doc11.bool from t1 use document keys where t1.doc11.bool between 0 and 1;
+select t1.doc11.bool from t1 use document keys where t1.doc11.bool between 0 and 1;
+
+explain extended select t1.doc11.bool from t1 use document keys where t1.doc11.bool not between 0 and 1;
+select t1.doc11.bool from t1 use document keys where t1.doc11.bool not between 0 and 1;
+
+explain extended select t1.doc11.bool from t1 use document keys where t1.doc11.bool in (0, 1);
+select t1.doc11.bool from t1 use document keys where t1.doc11.bool in (0, 1);
+
+explain extended select t1.doc11.bool from t1 use document keys where t1.doc11.bool in (0);
+select t1.doc11.bool from t1 use document keys where t1.doc11.bool in (0);
+
+explain extended select t1.doc11.bool from t1 use document keys where t1.doc11.bool not in (1);
+select t1.doc11.bool from t1 use document keys where t1.doc11.bool not in (1);
+
+explain extended select t1.doc11.bool from t1 use document keys
+                 where (t1.doc11.bool >= 0 and t1.doc11.bool <= 255) and (t1.doc11.bool not in (0));
+select t1.doc11.bool from t1 use document keys
+where (t1.doc11.bool >= 0 and t1.doc11.bool <= 255) and (t1.doc11.bool not in (0));
+
+# group by
+explain extended select count(a1) from t1 use document keys group by doc11.bool;
+select count(a1) from t1 use document keys group by doc11.bool;
+
+explain extended select sum(a1) from t1 use document keys group by doc11.bool;
+select sum(a1) from t1 use document keys group by doc11.bool;
+
+explain extended select avg(a1) from t1 use document keys group by doc11.bool;
+select avg(a1) from t1 use document keys group by doc11.bool;
+
+explain extended select doc11.bool from t1 where doc11.bool is true;
+select doc11.bool from t1 where doc11.bool is true;
+
+explain extended select doc11.bool from t1 use document keys where doc11.bool is true;
+select doc11.bool from t1 use document keys where doc11.bool is true;
+
+explain extended select count(doc11.bool) from t1 use document keys group by doc11.bool;
+select count(doc11.bool) from t1 use document keys group by doc11.bool;
+
+explain extended select sum(doc11.bool) from t1 use document keys group by doc11.bool;
+select sum(doc11.bool) from t1 use document keys group by doc11.bool;
+
+explain extended select avg(doc11.bool) from t1 use document keys group by doc11.bool;
+select avg(doc11.bool) from t1 use document keys group by doc11.bool;
+
+# doc_bool is the smallest secondary index to cover primary key
+
+explain extended select a1 from t1;
+select a1 from t1;
+explain extended select a1 from t1 use document keys;
+select a1 from t1 use document keys;
+
+#
+# bool: non-covering index for range queries
+#
+
+explain extended select * from t1 where doc11.bool is true;
+select * from t1 where doc11.bool is true;
+
+explain extended select * from t1 use document keys where doc11.bool is true;
+select * from t1 use document keys where doc11.bool is true;
+
+explain extended select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool > 0;
+select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool > 0;
+
+explain extended select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool < 1;
+select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool < 1;
+
+explain extended select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool > 0 and t1.doc11.bool < 1;
+select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool > 0 and t1.doc11.bool < 1;
+
+explain extended select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool >= 0;
+select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool >= 0;
+
+explain extended select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool > 0 and t1.doc11.bool <= 1;
+select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool > 0 and t1.doc11.bool <= 1;
+
+explain extended select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool between 0 and 1;
+select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool between 0 and 1;
+
+explain extended select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool not between 0 and 1;
+select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool not between 0 and 1;
+
+explain extended select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool in (0, 1);
+select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool in (0, 1);
+
+explain extended select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool in (0);
+select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool in (0);
+
+explain extended select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool not in (1);
+select t1.doc11.int, t1.doc11.bool from t1 use document keys where t1.doc11.bool not in (1);
+
+explain extended select t1.doc11.int, t1.doc11.bool from t1 use document keys
+                 where (t1.doc11.bool >= 0 and t1.doc11.bool <= 255) and (t1.doc11.bool not in (0));
+select t1.doc11.int, t1.doc11.bool from t1 use document keys
+where (t1.doc11.bool >= 0 and t1.doc11.bool <= 255) and (t1.doc11.bool not in (0));
+
+# group by
+
+# index scan for count-star
+explain extended select count(*) from t1 use document keys group by doc11.bool;
+select count(*) from t1 use document keys group by doc11.bool;
+
+explain extended select doc11 from t1 where doc11.bool is true;
+select doc11 from t1 where doc11.bool is true;
+
+explain extended select doc11 from t1 use document keys where doc11.bool is true;
+select doc11 from t1 use document keys where doc11.bool is true;
+
+explain extended select count(doc11) from t1 use document keys group by doc11.bool;
+select count(doc11) from t1 use document keys group by doc11.bool;
+
+explain extended select doc11.int from t1 where doc11.bool is true;
+select doc11.int from t1 where doc11.bool is true;
+
+explain extended select doc11.int from t1 use document keys where doc11.bool is true;
+select doc11.int from t1 use document keys where doc11.bool is true;
+
+explain extended select count(doc11.int) from t1 use document keys group by doc11.bool;
+select count(doc11.int) from t1 use document keys group by doc11.bool;
+
+##
+## integer index type
+##
+
+#
+# int: covering index for range queries
+#
+
+# on not-nullable document column
+explain extended select a1 from t1 where doc11.int > 5;
+select a1 from t1 where doc11.int > 5;
+
+explain extended select a1 from t1 use document keys where doc11.int > 5;
+select a1 from t1 use document keys where doc11.int > 5;
+
+explain extended select doc11.int from t1 use document keys where doc11.int >= 5;
+select doc11.int from t1 use document keys where doc11.int >= 5;
+
+# out of range
+explain extended select a1 from t1 use document keys where doc11.int > 13;
+select a1 from t1 use document keys where doc11.int > 13;
+
+explain extended select a1, doc11.int from t1 use document keys where doc11.int < 9;
+select a1, doc11.int from t1 use document keys where doc11.int < 9;
+
+explain extended select doc11.int, a1 from t1 use document keys where doc11.int <= 9;
+select doc11.int, a1 from t1 use document keys where doc11.int <= 9;
+
+# out of range
+explain extended select doc11.int from t1 use document keys where doc11.int < 1;
+select doc11.int from t1 use document keys where doc11.int < 1;
+
+explain extended select a1, doc11.int from t1 use document keys where doc11.int > 5 and doc11.int < 9;
+select a1, doc11.int from t1 use document keys where doc11.int > 5 and doc11.int < 9;
+
+explain extended select a1 from t1 use document keys where doc11.int >= 5 and doc11.int <= 9;
+select a1 from t1 use document keys where doc11.int >= 5 and doc11.int <= 9;
+
+explain extended select a1 from t1 use document keys where doc11.int > 0 and doc11.int < 130;
+select a1 from t1 use document keys where doc11.int > 0 and doc11.int < 130;
+
+# between
+explain extended select a1, doc11.int from t1 use document keys where doc11.int between 5 and 9;
+select a1, doc11.int from t1 use document keys where doc11.int between 5 and 9;
+
+explain extended select doc11.int from t1 use document keys where doc11.int between 5 and 15;
+select doc11.int from t1 use document keys where doc11.int between 5 and 15;
+
+# not between
+explain extended select a1, doc11.int from t1 use document keys where doc11.int not between 5 and 9;
+select a1, doc11.int from t1 use document keys where doc11.int not between 5 and 9;
+
+explain extended select a1, doc11.int from t1 use document keys where doc11.int not between 5 and 130;
+select a1, doc11.int from t1 use document keys where doc11.int not between 5 and 130;
+
+# in
+explain extended select a1, doc11.int from t1 use document keys where doc11.int in (5, 7, 9, 12);
+select a1, doc11.int from t1 use document keys where doc11.int in (5, 7, 9, 12);
+
+explain extended select a1, doc11.int from t1 use document keys where doc11.int in (5, 100, 0);
+select a1, doc11.int from t1 use document keys where doc11.int in (5, 100, 0);
+
+# not in
+explain extended select a1, doc11.int from t1 use document keys where doc11.int not in (5, 7, 9, 12);
+select a1, doc11.int from t1 use document keys where doc11.int not in (5, 7, 9, 12);
+
+explain extended select a1, doc11.int from t1 use document keys where doc11.int not in (0, 100, 5, 6, 7, 12, 11, 10);
+select a1, doc11.int from t1 use document keys where doc11.int not in (0, 100, 5, 6, 7, 12, 11, 10);
+
+# multiple ranges without overlap
+explain extended select doc11.int from t1 use document keys
+where doc11.int > 3 and doc11.int < 5 or doc11.int > 6 and doc11.int < 8 or
+      doc11.int > 9 and doc11.int < 11 or doc11.int >= 12 and doc11.int <= 15;
+
+select doc11.int from t1 use document keys
+where doc11.int > 3 and doc11.int < 5 or doc11.int > 6 and doc11.int < 8 or
+      doc11.int > 9 and doc11.int < 11 or doc11.int >= 12 and doc11.int <= 15;
+
+# multiple ranges with overlap
+explain extended select doc11.int from t1 use document keys
+where doc11.int > 3 and doc11.int < 8 or doc11.int > 5 and doc11.int < 9 or
+      doc11.int > 7 and doc11.int <= 15 or doc11.int >= 12 and doc11.int < 15;
+
+select doc11.int from t1 use document keys
+where doc11.int > 3 and doc11.int < 8 or doc11.int > 5 and doc11.int < 9 or
+      doc11.int > 7 and doc11.int <= 15 or doc11.int >= 12 and doc11.int < 15;
+
+explain extended select doc11.int from t1 use document keys
+where ((doc11.int > 3 and doc11.int < 8) and (doc11.int not between 6 and 9)) or
+       ((doc11.int between 11 and 15) and (doc11.int not in (4, 5)));
+
+select doc11.int from t1 use document keys
+where ((doc11.int > 3 and doc11.int < 8) and (doc11.int not between 6 and 9)) or
+       ((doc11.int between 11 and 15) and (doc11.int not in (4, 5)));
+
+# group by
+explain extended select count(a1) from t1 use document keys group by doc11.int having doc11.int > 5;
+select count(a1) from t1 use document keys group by doc11.int having doc11.int > 5;
+
+# order by
+explain extended select a1 from t1 use document keys order by doc11.int;
+select a1 from t1 use document keys order by doc11.int;
+
+explain extended select a1 from t1 use document keys order by doc11.int as string;
+select a1 from t1 use document keys order by doc11.int as string;
+select a1 from t1 order by doc11.int as string;
+
+explain extended select b1 from t1 use document keys order by doc11.double as string;
+select c1 from t1 use document keys order by doc11.double as string;
+select c1 from t1 order by doc11.double as string;
+
+explain extended select doc11.int from t1 where doc11.int > 5;
+select doc11.int from t1 where doc11.int > 5;
+explain extended select doc11.int from t1 use document keys where doc11.int > 5;
+select doc11.int from t1 use document keys where doc11.int > 5;
+
+# group by
+explain extended select count(doc11.int) from t1 use document keys group by doc11.int having doc11.int > 5 ;
+select count(doc11.int) from t1 use document keys group by doc11.int having doc11.int > 5 ;
+
+# group by with where clause
+explain extended select count(doc11.int) from t1 use document keys where doc11.int > 5 group by doc11.int;
+select count(doc11.int) from t1 use document keys where doc11.int > 5 group by doc11.int;
+explain extended select count(a1) from t1 use document keys where doc11.int = 5 group by doc11.int;
+select count(a1) from t1 use document keys where doc11.int = 5 group by doc11.int;
+
+# on nullable document column
+explain extended select a1 from t1 where doc12.int > 5;
+select a1 from t1 where doc12.int > 5;
+explain extended select a1 from t1 use document keys where doc12.int > 5;
+select a1 from t1 use document keys where doc12.int > 5;
+
+# group by
+explain extended select count(a1) from t1 use document keys group by doc12.int having doc12.int > 5;
+select count(a1) from t1 use document keys group by doc12.int having doc12.int > 5;
+
+explain extended select doc12.int from t1 where doc12.int > 5;
+select doc12.int from t1 where doc12.int > 5;
+explain extended select doc12.int from t1 use document keys where doc12.int > 5;
+select doc12.int from t1 use document keys where doc12.int > 5;
+
+# group by
+explain extended select count(doc12.int) from t1 use document keys group by doc12.int having doc12.int > 5;
+select count(doc12.int) from t1 use document keys group by doc12.int having doc12.int > 5;
+
+#
+# int: non-covering index for range queries
+#
+
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int > 5;
+select doc11.string, doc11.int from t1 use document keys where doc11.int > 5;
+
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int >= 5;
+select doc11.string, doc11.int from t1 use document keys where doc11.int >= 5;
+
+# out of range
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int > 13;
+select doc11.string, doc11.int from t1 use document keys where doc11.int > 13;
+
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int < 9;
+select doc11.string, doc11.int from t1 use document keys where doc11.int < 9;
+
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int <= 5;
+select doc11.string, doc11.int from t1 use document keys where doc11.int <= 5;
+
+# out of range
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int < 1;
+select doc11.string, doc11.int from t1 use document keys where doc11.int < 1;
+
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int > 2 and doc11.int < 12;
+select doc11.string, doc11.int from t1 use document keys where doc11.int > 2 and doc11.int < 12;
+
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int >= 5 and doc11.int <= 9;
+select doc11.string, doc11.int from t1 use document keys where doc11.int >= 5 and doc11.int <= 9;
+
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int > 0 and doc11.int < 130;
+select doc11.string, doc11.int from t1 use document keys where doc11.int > 0 and doc11.int < 130;
+
+# between
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int between 8 and 9;
+select doc11.string, doc11.int from t1 use document keys where doc11.int between 5 and 9;
+
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int between 5 and 15;
+select doc11.string, doc11.int from t1 use document keys where doc11.int between 5 and 15;
+
+# not between
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int not between 8 and 9;
+select doc11.string, doc11.int from t1 use document keys where doc11.int not between 8 and 9;
+
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int not between 2 and 12;
+select doc11.string, doc11.int from t1 use document keys where doc11.int not between 2 and 12;
+
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int not between 5 and 130;
+select doc11.string, doc11.int from t1 use document keys where doc11.int not between 5 and 130;
+
+# in
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int in (8);
+select doc11.string, doc11.int from t1 use document keys where doc11.int in (8);
+
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int in (8, 12);
+select doc11.string, doc11.int from t1 use document keys where doc11.int in (8, 12);
+
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int in (8, 7, 9, 12);
+select doc11.string, doc11.int from t1 use document keys where doc11.int in (8, 7, 9, 12);
+
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int in (8, 100, 0);
+select doc11.string, doc11.int from t1 use document keys where doc11.int in (8, 100, 0);
+
+# not in
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int not in (8, 7, 9, 12);
+select doc11.string, doc11.int from t1 use document keys where doc11.int not in (8, 7, 9, 12);
+
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.int not in (0, 100, 5, 6, 7, 12, 11, 10);
+select doc11.string, doc11.int from t1 use document keys where doc11.int not in (0, 100, 5, 6, 7, 12, 11, 10);
+
+# multiple ranges without overlap
+explain extended select doc11.string, doc11.int from t1 use document keys
+where doc11.int > 3 and doc11.int < 5 or doc11.int >= 11 and doc11.int < 100;
+
+select doc11.string, doc11.int from t1 use document keys
+where doc11.int > 3 and doc11.int < 5 or doc11.int >= 11 and doc11.int < 100;
+
+explain extended select doc11.string, doc11.int from t1 use document keys
+where doc11.int > 3 and doc11.int < 5 or doc11.int > 6 and doc11.int < 8 or
+      doc11.int > 9 and doc11.int < 11 or doc11.int >= 12 and doc11.int <= 15;
+
+select doc11.string, doc11.int from t1 use document keys
+where doc11.int > 3 and doc11.int < 5 or doc11.int > 6 and doc11.int < 8 or
+      doc11.int > 9 and doc11.int < 11 or doc11.int >= 12 and doc11.int <= 15;
+
+# multiple ranges with overlap
+explain extended select doc11.string, doc11.int from t1 use document keys
+where doc11.int > 3 and doc11.int < 8 or doc11.int > 5 and doc11.int < 9 or
+      doc11.int > 7 and doc11.int <= 15 or doc11.int >= 12 and doc11.int < 15;
+
+select doc11.string, doc11.int from t1 use document keys
+where doc11.int > 3 and doc11.int < 8 or doc11.int > 5 and doc11.int < 9 or
+      doc11.int > 7 and doc11.int <= 15 or doc11.int >= 12 and doc11.int < 15;
+
+explain extended select doc11.string, doc11.int from t1 use document keys
+where ((doc11.int > 3 and doc11.int < 8) and (doc11.int not between 6 and 9)) or
+       ((doc11.int between 11 and 15) and (doc11.int not in (4, 5)));
+
+select doc11.string, doc11.int from t1 use document keys
+where ((doc11.int > 3 and doc11.int < 8) and (doc11.int not between 6 and 9)) or
+       ((doc11.int between 11 and 15) and (doc11.int not in (4, 5)));
+
+# select path is a prefix of the indexed document path
+explain extended select doc11.k1.k2 from t1 where doc11.k1.k2.k3.int > 11;
+select doc11.k1.k2 from t1 where doc11.k1.k2.k3.int > 11;
+
+explain extended select doc11.k1.k2 from t1 use document keys where doc11.k1.k2.k3.int > 11;
+select doc11.k1.k2 from t1 use document keys where doc11.k1.k2.k3.int > 11;
+select doc11.k1.k2.k3 from t1 use document keys where doc11.k1.k2.k3.int > 11;
+select doc11.k1.k2.k3.int.foo from t1 use document keys where doc11.k1.k2.k3.int > 11;
+
+# where condition is a prefix of the indexed document path
+explain extended select doc11.k1.k2.k3.int from t1 use document keys where doc11.k1.k2.k3 > 11;
+select doc11.k1.k2.k3.int from t1 use document keys where doc11.k1.k2.k3 > 11;
+
+#
+# int: non-covering index for range queries with group by / order by
+#
+
+# group by with having
+--echo FIXME!!
+explain extended select count(*) from t1 use document keys group by doc11.int having doc11.int > 5;
+select count(*) from t1 use document keys group by doc11.int having doc11.int > 5;
+
+--echo FIXME!!
+explain extended select count(doc11) from t1 use document keys group by doc11.int having doc11.int > 5;
+select count(doc11) from t1 use document keys group by doc11.int having doc11.int > 5;
+
+--echo FIXME!!
+explain extended select sum(doc11.double) from t1 use document keys group by doc11.int having doc11.int > 5;
+select sum(doc11.double) from t1 use document keys group by doc11.int having doc11.int > 5;
+
+# group by with having on nullable document column
+--echo FIXME!!
+explain extended select count(*) from t1 use document keys group by doc12.int having doc12.int > 5;
+select count(*) from t1 use document keys group by doc12.int having doc12.int > 5;
+
+--echo FIXME!!
+explain extended select count(doc12) from t1 use document keys group by doc12.int having doc12.int > 5;
+select count(doc12) from t1 use document keys group by doc12.int having doc12.int > 5;
+
+--echo FIXME!!
+explain extended select sum(doc12.double) from t1 use document keys group by doc12.int having doc12.int > 5;
+select sum(doc12.double) from t1 use document keys group by doc12.int having doc12.int > 5;
+
+##
+## double index type
+##
+
+#
+# double: covering index
+#
+
+# on not-nullable document column
+explain extended select a1 from t1 where doc11.double > 5.5;
+select a1 from t1 where doc11.double > 5.5;
+explain extended select a1 from t1 use document keys where doc11.double > 5.5;
+select a1 from t1 use document keys where doc11.double > 5.5;
+
+# group by
+explain extended select sum(a1) from t1 use document keys group by doc11.double having doc11.double > 5.5;
+select sum(a1) from t1 use document keys group by doc11.double having doc11.double > 5.5;
+
+explain extended select doc11.double from t1 where doc11.double > 5.5;
+select doc11.double from t1 where doc11.double > 5.5;
+explain extended select doc11.double from t1 use document keys where doc11.double > 5.5;
+select doc11.double from t1 use document keys where doc11.double > 5.5;
+
+# group by
+explain extended select sum(doc11.double) from t1 use document keys group by doc11.double having doc11.double > 5.5;
+select sum(doc11.double) from t1 use document keys group by doc11.double having doc11.double > 5.5;
+
+# on nullable document column
+explain extended select a1 from t1 where doc12.double > 5.5;
+select a1 from t1 where doc12.double > 5.5;
+explain extended select a1 from t1 use document keys where doc12.double > 5.5;
+select a1 from t1 use document keys where doc12.double > 5.5;
+# group by
+explain extended select count(a1) from t1 use document keys group by doc12.double having doc12.double > 5.5;
+select count(a1) from t1 use document keys group by doc12.double having doc12.double > 5.5;
+
+explain extended select doc12.double from t1 where doc12.double > 5.5;
+select doc12.double from t1 where doc12.double > 5.5;
+explain extended select doc12.double from t1 use document keys where doc12.double > 5.5;
+select doc12.double from t1 use document keys where doc12.double > 5.5;
+# group by
+explain extended select count(doc12.double) from t1 use document keys group by doc12.double having doc12.double > 5.5;
+select count(doc12.double) from t1 use document keys group by doc12.double having doc12.double > 5.5;
+
+#
+# double: covering index for range queries
+#
+
+# on not-nullable document column
+explain extended select a1 from t1 where doc11.double > 5.5;
+select a1 from t1 where doc11.double > 5.5;
+
+explain extended select a1 from t1 use document keys where doc11.double > 5.5;
+select a1 from t1 use document keys where doc11.double > 5.5;
+
+explain extended select doc11.double from t1 use document keys where doc11.double >= 5.5;
+select doc11.double from t1 use document keys where doc11.double >= 5.5;
+
+# out of range
+explain extended select a1 from t1 use document keys where doc11.double > 13.3;
+select a1 from t1 use document keys where doc11.double > 13.3;
+
+explain extended select a1, doc11.double from t1 use document keys where doc11.double < 9.9;
+select a1, doc11.double from t1 use document keys where doc11.double < 9.9;
+
+explain extended select doc11.double, a1 from t1 use document keys where doc11.double <= 9.9;
+select doc11.double, a1 from t1 use document keys where doc11.double <= 9.9;
+
+# out of range
+explain extended select doc11.double from t1 use document keys where doc11.double < 0.1;
+select doc11.double from t1 use document keys where doc11.double < 0.1;
+
+explain extended select a1, doc11.double from t1 use document keys where doc11.double > 5.5 and doc11.double < 9.9;
+select a1, doc11.double from t1 use document keys where doc11.double > 5.5 and doc11.double < 9.9;
+
+explain extended select a1 from t1 use document keys where doc11.double >= 5.5 and doc11.double <= 9.9;
+select a1 from t1 use document keys where doc11.double >= 5.5 and doc11.double <= 9.9;
+
+explain extended select a1 from t1 use document keys where doc11.double > 0 and doc11.double < 130;
+select a1 from t1 use document keys where doc11.double > 0 and doc11.double < 130;
+
+# between
+explain extended select a1, doc11.double from t1 use document keys where doc11.double between 5.5 and 9.9;
+select a1, doc11.double from t1 use document keys where doc11.double between 5.5 and 9.9;
+
+explain extended select doc11.double from t1 use document keys where doc11.double between 5.5 and 15.5;
+select doc11.double from t1 use document keys where doc11.double between 5.5 and 15.5;
+
+# not between
+explain extended select a1, doc11.double from t1 use document keys where doc11.double not between 5.5 and 9.9;
+select a1, doc11.double from t1 use document keys where doc11.double not between 5.5 and 9.9;
+
+explain extended select a1, doc11.double from t1 use document keys where doc11.double not between 5.5 and 130;
+select a1, doc11.double from t1 use document keys where doc11.double not between 5.5 and 130;
+
+# in
+explain extended select a1, doc11.double from t1 use document keys where doc11.double in (3.3, 8.8, 4.4);
+select a1, doc11.double from t1 use document keys where doc11.double in (3.3, 8.8, 4.4);
+
+explain extended select a1, doc11.double from t1 use document keys where doc11.double in (5.5, 100, 0);
+select a1, doc11.double from t1 use document keys where doc11.double in (5.5, 100, 0);
+
+# not in
+explain extended select a1, doc11.double from t1 use document keys where doc11.double not in (5.5, 7.7, 9.9, 12.12);
+select a1, doc11.double from t1 use document keys where doc11.double not in (5.5, 7.7, 9.9, 12.12);
+
+explain extended select a1, doc11.double from t1 use document keys where doc11.double not in (0, 100, 5.5, 6.6, 7.7, 12.12, 11.11, 10.1);
+select a1, doc11.double from t1 use document keys where doc11.double not in (0, 100, 5.5, 6.6, 7.7, 12.12, 11.11, 10.1);
+
+# multiple ranges without overlap
+explain extended select doc11.double from t1 use document keys
+where doc11.double > 3.3 and doc11.double < 5.5 or doc11.double > 6.6 and doc11.double < 8.8 or
+      doc11.double > 9.9 and doc11.double < 11.11 or doc11.double >= 12.12 and doc11.double <= 15.15;
+
+select doc11.double from t1 use document keys
+where doc11.double > 3.3 and doc11.double < 5.5 or doc11.double > 6.6 and doc11.double < 8.8 or
+      doc11.double > 9.9 and doc11.double < 11.11 or doc11.double >= 12.12 and doc11.double <= 15.15;
+
+# multiple ranges with overlap
+explain extended select doc11.double from t1 use document keys
+where doc11.double > 3.3 and doc11.double < 8.8 or doc11.double > 5.5 and doc11.double < 9.9 or
+      doc11.double > 7.7 and doc11.double <= 15.15 or doc11.double >= 12.12 and doc11.double < 15.15;
+
+select doc11.double from t1 use document keys
+where doc11.double > 3.3 and doc11.double < 8.8 or doc11.double > 5.5 and doc11.double < 9.9 or
+      doc11.double > 7.7 and doc11.double <= 15.15 or doc11.double >= 12.12 and doc11.double < 15.15;
+
+explain extended select doc11.double from t1 use document keys
+where ((doc11.double > 4.4 and doc11.double < 10.10) and (doc11.double not between 8.8 and 9.9)) or
+       ((doc11.double between 3.3 and 15.15) and (doc11.double not in (4.4, 5.5)));
+
+select doc11.double from t1 use document keys
+where ((doc11.double > 4.4 and doc11.double < 10.10) and (doc11.double not between 8.8 and 9.9)) or
+       ((doc11.double between 3.3 and 15.15) and (doc11.double not in (4.4, 5.5)));
+
+#
+# double: non-covering index for range queries
+#
+
+# on not-nullable document column
+explain extended select a1, doc11.int from t1 where doc11.double > 5.5;
+select a1, doc11.int from t1 where doc11.double > 5.5;
+
+explain extended select a1, doc11.int from t1 use document keys where doc11.double > 5.5;
+select a1, doc11.int from t1 use document keys where doc11.double > 5.5;
+
+explain extended select doc11.double, doc11.int from t1 use document keys where doc11.double >= 5.5;
+select doc11.double, doc11.int from t1 use document keys where doc11.double >= 5.5;
+
+# out of range
+explain extended select a1, doc11.int from t1 use document keys where doc11.double > 13.3;
+select a1, doc11.int from t1 use document keys where doc11.double > 13.3;
+
+explain extended select a1, doc11.double, doc11.int from t1 use document keys where doc11.double < 9.9;
+select a1, doc11.double, doc11.int from t1 use document keys where doc11.double < 9.9;
+
+explain extended select doc11.double, a1, doc11.int from t1 use document keys where doc11.double <= 9.9;
+select doc11.double, a1, doc11.int from t1 use document keys where doc11.double <= 9.9;
+
+# out of range
+explain extended select doc11.double, doc11.int from t1 use document keys where doc11.double < 0.1;
+select doc11.double, doc11.int from t1 use document keys where doc11.double < 0.1;
+
+explain extended select a1, doc11.double, doc11.int from t1 use document keys where doc11.double > 5.5 and doc11.double < 9.9;
+select a1, doc11.double, doc11.int from t1 use document keys where doc11.double > 5.5 and doc11.double < 9.9;
+
+explain extended select a1, doc11.int from t1 use document keys where doc11.double >= 5.5 and doc11.double <= 9.9;
+select a1, doc11.int from t1 use document keys where doc11.double >= 5.5 and doc11.double <= 9.9;
+
+explain extended select a1, doc11.int from t1 use document keys where doc11.double > 0 and doc11.double < 130;
+select a1, doc11.int from t1 use document keys where doc11.double > 0 and doc11.double < 130;
+
+# between
+explain extended select a1, doc11.double, doc11.int from t1 use document keys where doc11.double between 5.5 and 9.9;
+select a1, doc11.double, doc11.int from t1 use document keys where doc11.double between 5.5 and 9.9;
+
+explain extended select doc11.double, doc11.int from t1 use document keys where doc11.double between 5.5 and 15.5;
+select doc11.double, doc11.int from t1 use document keys where doc11.double between 5.5 and 15.5;
+
+# not between
+explain extended select a1, doc11.double, doc11.int from t1 use document keys where doc11.double not between 5.5 and 9.9;
+select a1, doc11.double, doc11.int from t1 use document keys where doc11.double not between 5.5 and 9.9;
+
+explain extended select a1, doc11.double, doc11.int from t1 use document keys where doc11.double not between 5.5 and 130;
+select a1, doc11.double, doc11.int from t1 use document keys where doc11.double not between 5.5 and 130;
+
+# in
+explain extended select a1, doc11.double, doc11.int from t1 use document keys where doc11.double in (5.5, 7.7, 9.9, 12.12);
+select a1, doc11.double, doc11.int from t1 use document keys where doc11.double in (5.5, 7.7, 9.9, 12.12);
+
+explain extended select a1, doc11.double, doc11.int from t1 use document keys where doc11.double in (5.5, 100, 0);
+select a1, doc11.double, doc11.int from t1 use document keys where doc11.double in (5.5, 100, 0);
+
+# not in
+explain extended select a1, doc11.double, doc11.int from t1 use document keys where doc11.double not in (5.5, 7.7, 9.9, 12.12);
+select a1, doc11.double, doc11.int from t1 use document keys where doc11.double not in (5.5, 7.7, 9.9, 12.12);
+
+explain extended select a1, doc11.double, doc11.int from t1 use document keys where doc11.double not in (0, 100, 5.5, 6.6, 7.7, 12.12, 11.11, 10.1);
+select a1, doc11.double, doc11.int from t1 use document keys where doc11.double not in (0, 100, 5.5, 6.6, 7.7, 12.12, 11.11, 10.1);
+
+# multiple ranges without overlap
+explain extended select doc11.double, doc11.int from t1 use document keys
+where doc11.double > 3.3 and doc11.double < 5.5 or doc11.double > 6.6 and doc11.double < 8.8 or
+      doc11.double > 9.9 and doc11.double < 11.11 or doc11.double >= 12.12 and doc11.double <= 15.15;
+
+select doc11.double, doc11.int from t1 use document keys
+where doc11.double > 3.3 and doc11.double < 5.5 or doc11.double > 6.6 and doc11.double < 8.8 or
+      doc11.double > 9.9 and doc11.double < 11.11 or doc11.double >= 12.12 and doc11.double <= 15.15;
+
+# multiple ranges with overlap
+explain extended select doc11.double, doc11.int from t1 use document keys
+where doc11.double > 3.3 and doc11.double < 8.8 or doc11.double > 5.5 and doc11.double < 9.9 or
+      doc11.double > 7.7 and doc11.double <= 15.15 or doc11.double >= 12.12 and doc11.double < 15.15;
+
+select doc11.double, doc11.int from t1 use document keys
+where doc11.double > 3.3 and doc11.double < 8.8 or doc11.double > 5.5 and doc11.double < 9.9 or
+      doc11.double > 7.7 and doc11.double <= 15.15 or doc11.double >= 12.12 and doc11.double < 15.15;
+
+explain extended select doc11.double, doc11.int from t1 use document keys
+where ((doc11.double > 4.4 and doc11.double < 10.10) and (doc11.double not between 8.8 and 9.9)) or
+       ((doc11.double between 3.3 and 15.15) and (doc11.double not in (4.4, 5.5)));
+
+select doc11.double, doc11.int from t1 use document keys
+where ((doc11.double > 4.4 and doc11.double < 10.10) and (doc11.double not between 8.8 and 9.9)) or
+       ((doc11.double between 3.3 and 15.15) and (doc11.double not in (4.4, 5.5)));
+
+#
+# double: non-covering index for range queries with aggregations
+#
+
+# on not-nullable document column
+explain extended select * from t1 where doc11.double > 5.5;
+select * from t1 where doc11.double > 5.5;
+
+explain extended select * from t1 use document keys where doc11.double > 5.5;
+select * from t1 use document keys where doc11.double > 5.5;
+
+# group by
+explain extended select count(*) from t1 use document keys group by doc11.double having doc11.double > 5.5;
+select count(*) from t1 use document keys group by doc11.double having doc11.double > 5.5;
+
+explain extended select doc11 from t1 where doc11.double > 5.5;
+select doc11 from t1 where doc11.double > 5.5;
+
+explain extended select doc11 from t1 use document keys where doc11.double > 5.5;
+select doc11 from t1 use document keys where doc11.double > 5.5;
+
+# group by
+explain extended select count(doc11) from t1 use document keys group by doc11.double having doc11.double > 5.5;
+select count(doc11) from t1 use document keys group by doc11.double having doc11.double > 5.5;
+
+explain extended select doc11.string from t1 where doc11.double > 5.5;
+select doc11.string from t1 where doc11.double > 5.5;
+
+explain extended select doc11.string from t1 use document keys where doc11.double > 5.5;
+select doc11.string from t1 use document keys where doc11.double > 5.5;
+
+# group by
+explain extended select count(doc11.string) from t1 use document keys group by doc11.double having doc11.double > 5.5;
+select count(doc11.string) from t1 use document keys group by doc11.double having doc11.double > 5.5;
+
+# on nullable document column
+explain extended select * from t1 where doc12.double > 5.5;
+select * from t1 where doc12.double > 5.5;
+
+explain extended select * from t1 use document keys where doc12.double > 5.5;
+select * from t1 use document keys where doc12.double > 5.5;
+
+# group by
+explain extended select count(*) from t1 use document keys group by doc12.double having doc12.double > 5.5;
+select count(*) from t1 use document keys group by doc12.double having doc12.double > 5.5;
+
+explain extended select doc12 from t1 where doc12.double > 5.5;
+select doc12 from t1 where doc12.double > 5.5;
+
+explain extended select doc12 from t1 use document keys where doc12.double > 5.5;
+select doc12 from t1 use document keys where doc12.double > 5.5;
+
+# group by
+explain extended select count(doc12) from t1 use document keys group by doc12.double having doc12.double > 5.5;
+select count(doc12) from t1 use document keys group by doc12.double having doc12.double > 5.5;
+
+explain extended select doc12.int from t1 where doc12.double > 5.5;
+select doc12.int from t1 where doc12.double > 5.5;
+
+explain extended select doc12.int from t1 use document keys where doc12.double > 5.5;
+select doc12.int from t1 use document keys where doc12.double > 5.5;
+
+# group by
+explain extended select count(doc12.int) from t1 use document keys group by doc12.double having doc12.double > 5.5;
+select count(doc12.int) from t1 use document keys group by doc12.double having doc12.double > 5.5;
+
+##
+## string index type
+##
+
+--echo FIXME!! Inconsistency between Boolean type and String
+--echo Boolean values (true/false) will be converted to "1" /"0" when creating a key image (for range optimization),
+--echo but it will be converted to "True"/"False" when getting values from document paths for building index keys.
+
+#
+# string: covering index
+#
+
+explain extended select a1 from t1 where doc11.string = 'eee';
+select a1 from t1 where doc11.string = 'eee';
+explain extended select a1 from t1 use document keys where doc11.string = 'eee';
+select a1 from t1 use document keys where doc11.string = 'eee';
+# group by string will not be covered by prefix indexes
+explain extended select count(a1) from t1 use document keys group by doc11.string having doc11.string = 'eee';
+select count(a1) from t1 use document keys group by doc11.string having doc11.string = 'eee';
+
+explain extended select doc11.string from t1 where doc11.string = 'eee';
+select doc11.string from t1 where doc11.string = 'eee';
+explain extended select doc11.string from t1 use document keys where doc11.string = 'eee';
+select doc11.string from t1 use document keys where doc11.string = 'eee';
+# group by string will not be covered by prefix indexes
+explain extended select count(doc11.string) from t1 use document keys group by doc11.string having doc11.string = 'eee';
+select count(doc11.string) from t1 use document keys group by doc11.string having doc11.string = 'eee';
+
+#
+# string: non-covering
+#
+
+explain extended select * from t1 where doc11.string = 'eee';
+select * from t1 where doc11.string = 'eee';
+explain extended select * from t1 use document keys where doc11.string = 'eee';
+select * from t1 use document keys where doc11.string = 'eee';
+# group by
+explain extended select count(*) from t1 use document keys group by doc11.string having doc11.string = 'eee';
+select count(*) from t1 use document keys group by doc11.string having doc11.string = 'eee';
+
+explain extended select doc11 from t1 where doc11.string = 'eee';
+select doc11 from t1 where doc11.string = 'eee';
+explain extended select doc11 from t1 use document keys where doc11.string = 'eee';
+select doc11 from t1 use document keys where doc11.string = 'eee';
+# group by
+explain extended select count(doc11) from t1 use document keys group by doc11.string having doc11.string = 'eee';
+select count(doc11) from t1 use document keys group by doc11.string having doc11.string = 'eee';
+
+explain extended select doc11.int from t1 where doc11.string = 'eee';
+select doc11.int from t1 where doc11.string = 'eee';
+explain extended select doc11.int from t1 use document keys where doc11.string = 'eee';
+select doc11.int from t1 use document keys where doc11.string = 'eee';
+# group by
+explain extended select sum(doc11.int) from t1 use document keys group by doc11.string having doc11.string = 'eee';
+select sum(doc11.int) from t1 use document keys group by doc11.string having doc11.string = 'eee';
+
+#
+# string: pattern match for string index key
+#
+
+explain extended select a1 from t1 where doc11.string like 'e%';
+select a1 from t1 where doc11.string like 'e%';
+explain extended select a1 from t1 use document keys where doc11.string like 'e%';
+select a1 from t1 use document keys where doc11.string like 'e%';
+
+explain extended select doc11.string from t1 where doc11.string like 'e%';
+select doc11.string from t1 where doc11.string like 'e%';
+explain extended select doc11.string from t1 use document keys where doc11.string like 'e%';
+select doc11.string from t1 use document keys where doc11.string like 'e%';
+
+explain extended select * from t1 where doc11.string like 'e%';
+select * from t1 where doc11.string like 'e%';
+explain extended select * from t1 use document keys where doc11.string like 'e%';
+select * from t1 use document keys where doc11.string like 'e%';
+
+explain extended select doc11 from t1 where doc11.string like 'e%';
+select doc11 from t1 where doc11.string like 'e%';
+explain extended select doc11 from t1 use document keys where doc11.string like 'e%';
+select doc11 from t1 use document keys where doc11.string like 'e%';
+
+explain extended select doc11.int from t1 where doc11.string like 'e%';
+select doc11.int from t1 where doc11.string like 'e%';
+explain extended select doc11.int from t1 use document keys where doc11.string like 'e%';
+select doc11.int from t1 use document keys where doc11.string like 'e%';
+
+#
+# string: covering index for range queries
+#
+
+# on not-nullable document column
+explain extended select a1 from t1 where doc11.string > 'ee';
+select a1 from t1 where doc11.string > 'ee';
+
+explain extended select a1 from t1 use document keys where doc11.string > 'eee';
+select a1 from t1 use document keys where doc11.string > 'eee';
+
+explain extended select doc11.string from t1 use document keys where doc11.string >= 'kkk';
+select doc11.string from t1 use document keys where doc11.string >= 'kkk';
+
+# out of range
+explain extended select a1 from t1 use document keys where doc11.string > 'zzz';
+select a1 from t1 use document keys where doc11.string > 'zzz';
+
+explain extended select a1, doc11.string from t1 use document keys where doc11.string < 'iii';
+select a1, doc11.string from t1 use document keys where doc11.string < 'iii';
+
+explain extended select doc11.string, a1 from t1 use document keys where doc11.string <= 'iii';
+select doc11.string, a1 from t1 use document keys where doc11.string <= 'iii';
+
+# out of range
+explain extended select doc11.string from t1 use document keys where doc11.string < 'aaa';
+select doc11.double from t1 use document keys where doc11.string < 'aaa';
+
+explain extended select a1, doc11.string from t1 use document keys where doc11.string > 'eee' and doc11.string < 'iii';
+select a1, doc11.string from t1 use document keys where doc11.string > 'eee' and doc11.string < 'iii';
+
+explain extended select a1 from t1 use document keys where doc11.string >= 'eee' and doc11.string <= 'iii';
+select a1 from t1 use document keys where doc11.string >= 'eee' and doc11.string <= 'iii';
+
+explain extended select a1 from t1 use document keys where doc11.string > '' and doc11.string < 'zzz';
+select a1 from t1 use document keys where doc11.string > '' and doc11.string < 'zzz';
+
+# between
+explain extended select a1, doc11.string from t1 use document keys where doc11.string between 'eee' and 'iii';
+select a1, doc11.string from t1 use document keys where doc11.string between 'eee' and 'iii';
+
+explain extended select doc11.string from t1 use document keys where doc11.string between 'eee' and 'zzz';
+select doc11.string from t1 use document keys where doc11.string between 'eee' and 'zzz';
+
+# not between
+explain extended select a1, doc11.string from t1 use document keys where doc11.string not between 'eee' and 'iii';
+select a1, doc11.string from t1 use document keys where doc11.string not between 'eee' and 'iii';
+
+explain extended select a1, doc11.string from t1 use document keys where doc11.string not between 'eee' and 'zzz';
+select a1, doc11.string from t1 use document keys where doc11.string not between 'eee' and 'zzz';
+
+# in
+explain extended select a1, doc11.string from t1 use document keys where doc11.string in ('eee', 'ggg', 'iii', 'lll');
+select a1, doc11.string from t1 use document keys where doc11.string in ('eee', 'ggg', 'iii', 'lll');
+
+explain extended select a1, doc11.string from t1 use document keys where doc11.string in ('eee', 'zzz', '');
+select a1, doc11.string from t1 use document keys where doc11.string in ('eee', 'zzz', '');
+
+# not in
+explain extended select a1, doc11.string from t1 use document keys where doc11.string not in ('eee', 'ggg', 'iii', 'lll');
+select a1, doc11.string from t1 use document keys where doc11.string not in ('eee', 'ggg', 'iii', 'lll');
+
+explain extended select a1, doc11.string from t1 use document keys where doc11.string not in ('', 'zzz', 'eee', 'fff', 'ggg', 'lll', 'iii', 'hhh');
+select a1, doc11.string from t1 use document keys where doc11.string not in ('', 'zzz', 'eee', 'fff', 'ggg', 'lll', 'iii', 'hhh');
+
+# multiple ranges without overlap
+explain extended select doc11.string from t1 use document keys
+where doc11.string > 'ccc' and doc11.string < 'fff' or doc11.string > 'ggg' and doc11.string < 'hhh' or
+      doc11.string > 'iii' and doc11.string < 'kkk' or doc11.string >= 'lll' and doc11.string <= 'zzz';
+
+select doc11.string from t1 use document keys
+where doc11.string > 'ccc' and doc11.string < 'fff' or doc11.string > 'ggg' and doc11.string < 'hhh' or
+      doc11.string > 'iii' and doc11.string < 'kkk' or doc11.string >= 'lll' and doc11.string <= 'zzz';
+
+# multiple ranges with overlap
+explain extended select doc11.string from t1 use document keys
+where doc11.string > 'ccc' and doc11.string < 'hhh' or doc11.string > 'fff' and doc11.string < 'iii' or
+      doc11.string > 'ggg' and doc11.string <= 'zzz' or doc11.string >= 'lll' and doc11.string < 'zzz';
+
+select doc11.string from t1 use document keys
+where doc11.string > 'ccc' and doc11.string < 'hhh' or doc11.string > 'fff' and doc11.string < 'iii' or
+      doc11.string > 'ggg' and doc11.string <= 'zzz' or doc11.string >= 'lll' and doc11.string < 'zzz';
+
+explain extended select doc11.string from t1 use document keys
+where ((doc11.string > 'ccc' and doc11.string < 'hhh') and (doc11.string not between 'ggg' and 'iii')) or
+       ((doc11.string between 'kkk' and 'zzz') and (doc11.string not in ('ddd', 'eee')));
+
+select doc11.string from t1 use document keys
+where ((doc11.string > 'ccc' and doc11.string < 'hhh') and (doc11.string not between 'ggg' and 'iii')) or
+       ((doc11.string between 'kkk' and 'zzz') and (doc11.string not in ('ddd', 'eee')));
+
+#
+# string: non-covering index for range queries
+#
+
+# on not-nullable document column
+explain extended select a1, doc11.int from t1 where doc11.string > 'eee';
+select a1, doc11.int from t1 where doc11.string > 'eee';
+
+explain extended select a1, doc11.int from t1 use document keys where doc11.string > 'eee';
+select a1, doc11.int from t1 use document keys where doc11.string > 'eee';
+
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.string >= 'kkk';
+select doc11.string, doc11.int from t1 use document keys where doc11.string >= 'kkk';
+
+# out of range
+explain extended select a1, doc11.int from t1 use document keys where doc11.string > 'zzz';
+select a1, doc11.int from t1 use document keys where doc11.string > 'zzz';
+
+explain extended select a1, doc11.string, doc11.int from t1 use document keys where doc11.string < 'iii';
+select a1, doc11.string, doc11.int from t1 use document keys where doc11.string < 'iii';
+
+explain extended select doc11.string, a1, doc11.int from t1 use document keys where doc11.string <= 'iii';
+select doc11.string, a1, doc11.int from t1 use document keys where doc11.string <= 'iii';
+
+# out of range
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.string < 'aaa';
+select doc11.string, doc11.int from t1 use document keys where doc11.string < 'aaa';
+
+explain extended select a1, doc11.string, doc11.int from t1 use document keys where doc11.string > 'eee' and doc11.string < 'iii';
+select a1, doc11.string, doc11.int from t1 use document keys where doc11.string > 'eee' and doc11.string < 'iii';
+
+explain extended select a1, doc11.int from t1 use document keys where doc11.string >= 'eee' and doc11.string <= 'iii';
+select a1, doc11.int from t1 use document keys where doc11.string >= 'eee' and doc11.string <= 'iii';
+
+explain extended select a1, doc11.int from t1 use document keys where doc11.string > '' and doc11.string < 'zzz';
+select a1, doc11.int from t1 use document keys where doc11.string > '' and doc11.string < 'zzz';
+
+# between
+explain extended select a1, doc11.string, doc11.int from t1 use document keys where doc11.string between 'eee' and 'iii';
+select a1, doc11.string, doc11.int from t1 use document keys where doc11.string between 'eee' and 'iii';
+
+explain extended select doc11.string, doc11.int from t1 use document keys where doc11.string between 'eee' and 'zzz';
+select doc11.string, doc11.int from t1 use document keys where doc11.string between 'eee' and 'zzz';
+
+# not between
+explain extended select a1, doc11.string, doc11.int from t1 use document keys where doc11.string not between 'eee' and 'iii';
+select a1, doc11.string, doc11.int from t1 use document keys where doc11.string not between 'eee' and 'iii';
+
+explain extended select a1, doc11.string, doc11.int from t1 use document keys where doc11.string not between 'eee' and 'zzz';
+select a1, doc11.string, doc11.int from t1 use document keys where doc11.string not between 'eee' and 'zzz';
+
+# in
+explain extended select a1, doc11.string, doc11.int from t1 use document keys where doc11.string in ('eee', 'ggg', 'iii', 'lll');
+select a1, doc11.string, doc11.int from t1 use document keys where doc11.string in ('eee', 'ggg', 'iii', 'lll');
+
+explain extended select a1, doc11.string, doc11.int from t1 use document keys where doc11.string in ('eee', 'zzz', '');
+select a1, doc11.string, doc11.int from t1 use document keys where doc11.string in ('eee', 'zzz', '');
+
+# not in
+explain extended select a1, doc11.string, doc11.int from t1 use document keys where doc11.string not in ('eee', 'ggg', 'iii', 'lll');
+select a1, doc11.string, doc11.int from t1 use document keys where doc11.string not in ('eee', 'ggg', 'iii', 'lll');
+
+explain extended select a1, doc11.string, doc11.int from t1 use document keys where doc11.string not in ('', 'zzz', 'eee', 'fff', 'ggg', 'lll', 'iii', 'hhh');
+select a1, doc11.string, doc11.int from t1 use document keys where doc11.string not in ('', 'zzz', 'eee', 'fff', 'ggg', 'lll', 'iii', 'hhh');
+
+# multiple ranges without overlap
+explain extended select doc11.string, doc11.int from t1 use document keys
+where doc11.string > 'ccc' and doc11.string < 'fff' or doc11.string > 'ggg' and doc11.string < 'hhh' or
+      doc11.string > 'iii' and doc11.string < 'kkk' or doc11.string >= 'lll' and doc11.string <= 'zzz';
+
+select doc11.string, doc11.int from t1 use document keys
+where doc11.string > 'ccc' and doc11.string < 'fff' or doc11.string > 'ggg' and doc11.string < 'hhh' or
+      doc11.string > 'iii' and doc11.string < 'kkk' or doc11.string >= 'lll' and doc11.string <= 'zzz';
+
+# multiple ranges with overlap
+explain extended select doc11.string, doc11.int from t1 use document keys
+where doc11.string > 'ccc' and doc11.string < 'hhh' or doc11.string > 'fff' and doc11.string < 'iii' or
+      doc11.string > 'ggg' and doc11.string <= 'zzz' or doc11.string >= 'lll' and doc11.string < 'zzz';
+
+select doc11.string, doc11.int from t1 use document keys
+where doc11.string > 'ccc' and doc11.string < 'hhh' or doc11.string > 'fff' and doc11.string < 'iii' or
+      doc11.string > 'ggg' and doc11.string <= 'zzz' or doc11.string >= 'lll' and doc11.string < 'zzz';
+
+explain extended select doc11.string, doc11.int from t1 use document keys
+where ((doc11.string > 'ccc' and doc11.string < 'hhh') and (doc11.string not between 'ggg' and 'iii')) or
+       ((doc11.string between 'kkk' and 'zzz') and (doc11.string not in ('ddd', 'eee')));
+
+select doc11.string, doc11.int from t1 use document keys
+where ((doc11.string > 'ccc' and doc11.string < 'hhh') and (doc11.string not between 'ggg' and 'iii')) or
+       ((doc11.string between 'kkk' and 'zzz') and (doc11.string not in ('ddd', 'eee')));
+
+##
+## composite index
+##
+
+#
+# index scan
+#
+
+# doc1_b and b_doc1
+explain extended select doc11.int from t1 where b1 = 5;
+select doc11.int from t1 where b1 = 5;
+explain extended select doc11.int from t1 use document keys where b1 = 5;
+select doc11.int from t1 use document keys where b1 = 5;
+
+explain extended select b1 from t1 where doc11.int = 5;
+select b1 from t1 where doc11.int = 5;
+explain extended select b1 from t1 use document keys where doc11.int = 5;
+select b1 from t1 use document keys where doc11.int = 5;
+# group by
+explain extended select count(b1) from t1 use document keys group by doc11.int having doc11.int = 5;
+select count(b1) from t1 use document keys group by doc11.int having doc11.int = 5;
+
+explain extended select b1 from t1 where doc11.int > 5;
+select b1 from t1 where doc11.int > 5;
+explain extended select d1 from t1 use document keys where doc11.int > 5;
+select b1 from t1 use document keys where doc11.int > 5;
+
+# group by
+explain extended select sum(b1) from t1 use document keys group by doc11.int having doc11.int > 5;
+select sum(b1) from t1 use document keys group by doc11.int having doc11.int > 5;
+
+# doc1_c
+explain extended select doc11.double from t1 where c1 = 5.5;
+select doc11.double from t1 where c1 = 5.5;
+explain extended select doc11.double from t1 use document keys where c1 = 5.5;
+select doc11.double from t1 use document keys where c1 = 5.5;
+
+explain extended select c1 from t1 where doc11.double = 5.5;
+select c1 from t1 where doc11.double = 5.5;
+
+explain extended select c1 from t1 use document keys where doc11.double = 5.5;
+select c1 from t1 use document keys where doc11.double = 5.5;
+
+# work-around
+explain extended select c1 from t1 use document keys where doc11.double = '5.5';
+select c1 from t1 use document keys where doc11.double = '5.5';
+
+explain extended select c1 from t1 where doc11.double > 5.5;
+select c1 from t1 where doc11.double > 5.5;
+explain extended select c1 from t1 use document keys where doc11.double > 5.5;
+select c1 from t1 use document keys where doc11.double > 5.5;
+
+# doc1_d
+explain extended select doc11.int from t1 where d1 = 'eee';
+select doc11.int from t1 where d1 = 'eee';
+explain extended select doc11.int from t1 use document keys where d1 = 'eee';
+select doc11.int from t1 use document keys where d1 = 'eee';
+
+explain extended select d1 from t1 where doc11.int = 5;
+select d1 from t1 where doc11.int = 5;
+explain extended select d1 from t1 use document keys where doc11.int = 5;
+select d1 from t1 use document keys where doc11.int = 5;
+
+explain extended select d1 from t1 where doc11.int > 5;
+select d1 from t1 where doc11.int > 5;
+explain extended select d1 from t1 use document keys where doc11.int > 5;
+select d1 from t1 use document keys where doc11.int > 5;
+
+explain extended select d1 from t1 where doc11.int = '5';
+select d1 from t1 where doc11.int = '5';
+explain extended select d1 from t1 use document keys where doc11.int = '5';
+select d1 from t1 use document keys where doc11.int = '5';
+
+explain extended select d1 from t1 where doc11.int < '5';
+select d1 from t1 where doc11.int < '5';
+explain extended select d1 from t1 use document keys where doc11.int < '5';
+select d1 from t1 use document keys where doc11.int < '5';
+
+explain extended select a1 from t1 where doc11.int = 5;
+select a1 from t1 where doc11.int = 5;
+explain extended select a1 from t1 use document keys where doc11.int = 5;
+select a1 from t1 use document keys where doc11.int = 5;
+
+explain extended select a1 from t1 where doc11.int >= 5;
+select a1 from t1 where doc11.int >= 5;
+explain extended select a1 from t1 use document keys where doc11.int >= 5;
+select a1 from t1 use document keys where doc11.int >= 5;
+
+explain extended select a1 from t1 where d1 like 'eee' and doc11.int = 5;
+select a1 from t1 where d1 like 'eee' and doc11.int = 5;
+explain extended select a1 from t1 use document keys where d1 like 'eee' and doc11.int = 5;
+select a1 from t1 use document keys where d1 like 'eee' and doc11.int = 5;
+
+explain extended select a1 from t1 where d1 like 'e%' and doc11.int > 4;
+select a1 from t1 where d1 like 'e%' and doc11.int > 4;
+explain extended select a1 from t1 use document keys where d1 like 'e%' and doc11.int > 4;
+select a1 from t1 use document keys where d1 like 'e%' and doc11.int > 4;
+
+explain extended select a1, d1, doc11.int from t1 where d1 like 'eee' and doc11.int = 5;
+select a1, d1, doc11.int from t1 where d1 like 'eee' and doc11.int = 5;
+explain extended select a1, d1, doc11.int from t1 use document keys where d1 like 'eee' and doc11.int = 5;
+select a1, d1, doc11.int from t1 use document keys where d1 like 'eee' and doc11.int = 5;
+
+explain extended select a1, d1, doc11.int from t1 where d1 like 'e%' and doc11.int < 6;
+select a1, d1, doc11.int from t1 where d1 like 'e%' and doc11.int < 6;
+explain extended select a1, d1, doc11.int from t1 use document keys where d1 like 'e%' and doc11.int < 6;
+select a1, d1, doc11.int from t1 use document keys where d1 like 'e%' and doc11.int < 6;
+
+#
+# index access but no covering index
+#
+explain extended select b1 from t1 where doc11.int = 5;
+select b1 from t1 where doc11.int = 5;
+explain extended select b1 from t1 use document keys where doc11.int = 5;
+select b1 from t1 use document keys where doc11.int = 5;
+
+explain extended select * from t1 where doc11.int = 5;
+select * from t1 where doc11.int = 5;
+explain extended select * from t1 use document keys where doc11.int = 5;
+select * from t1 use document keys where doc11.int = 5;
+
+explain extended select doc11.double from t1 where doc11.int = 5;
+select doc11.double from t1 where doc11.int = 5;
+
+explain extended select doc11.double from t1 use document keys where doc11.int = 5;
+select doc11.double from t1 use document keys where doc11.int = 5;
+
+explain extended select doc11 from t1 where doc11.int = 5;
+select doc11 from t1 where doc11.int = 5;
+
+explain extended select doc11 from t1 use document keys where doc11.int = 5;
+select doc11 from t1 use document keys where doc11.int = 5;
+
+# if the select list is not covered by index, query works fine as well
+explain extended select b1, doc11.double from t1 where doc11.int = 5;
+select b1, doc11.double from t1 where doc11.int = 5;
+explain extended select b1, doc11.double from t1 use document keys where doc11.int = 5;
+select b1, doc11.double from t1 use document keys where doc11.int = 5;
+
+explain extended select b1, doc11 from t1 where doc11.int = 5;
+select b1, doc11 from t1 where doc11.int = 5;
+explain extended select b1, doc11 from t1 use document keys where doc11.int = 5;
+select b1, doc11 from t1 use document keys where doc11.int = 5;
+
+#
+# not all conditions are covered by index
+#
+explain extended select b1 from t1 where doc11.int = 5 and d1 = 5.5;
+select b1 from t1 where doc11.int = 5 and d1 = 5.5;
+explain extended select b1 from t1 use document keys where doc11.int = 5 and d1 = 5.5;
+select b1 from t1 use document keys where doc11.int = 5 and d1 = 5.5;
+
+explain extended select b1 from t1 where doc11.int = 5 and d1 > 5;
+select b1 from t1 where doc11.int = 5 and d1 > 5;
+explain extended select b1 from t1 use document keys where doc11.int = 5 and d1 > 5;
+select b1 from t1 use document keys where doc11.int = 5 and d1 > 5;
+
+#
+# doc1 key is considered but the smaller b_a key is picked
+#
+explain extended select c1 from t1 where doc11.int = 5 and b1 = 5;
+select c1 from t1 where doc11.int = 5 and b1 = 5;
+explain extended select c1 from t1 use document keys where doc11.int = 5 and b1 = 5;
+select c1 from t1 use document keys where doc11.int = 5 and b1 = 5;
+
+#
+# full table scan: where-condition is not part of any indexes
+#
+explain extended select doc11.int from t1 where doc11.id = 5;
+select doc11.int from t1 where doc11.id = 5;
+explain extended select doc11.int from t1 use document keys where doc11.id = 5;
+select doc11.int from t1 use document keys where doc11.id = 5;
+
+explain extended select a1, b1 from t1 where doc11.id = 5;
+select a1, b1 from t1 where doc11.id = 5;
+explain extended select a1, b1 from t1 use document keys where doc11.id = 5;
+select a1, b1 from t1 use document keys where doc11.id = 5;
+
+# to check whether value of document path in the temporal table can be read correct when using index
+select a1, doc11.int from t1 use document keys order by doc11.int;
+
+
+################################################################################
+###
+### Multi-table equi-joins and range joins
+###
+
+##
+## convering index for two table equi-join
+##
+
+# int
+explain extended select t1.doc11.int, t2.doc21.int
+from t1 use document keys, t2 use document keys
+where t1.doc11.int = t2.doc21.int;
+
+select t1.doc11.int, t2.doc21.int
+from t1 use document keys, t2 use document keys
+where t1.doc11.int = t2.doc21.int;
+
+# bool
+explain extended select t1.doc11.bool, t2.doc21.bool
+from t1 use document keys, t2 use document keys
+where t1.doc11.bool = t2.doc21.bool and t1.doc11.int < 3;
+
+# double
+explain extended select t1.doc11.double, t2.doc21.double
+from t1 use document keys, t2 use document keys
+where t1.doc11.double = t2.doc21.double;
+
+--echo NOT-A-BUG: Caused by the inaccuracy of double in MySQL
+select t1.doc11.double, t2.doc21.double
+from t1 use document keys, t2 use document keys
+where t1.doc11.double = t2.doc21.double;
+
+# string
+explain extended select t1.doc11.string, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where t1.doc11.string = t2.doc21.string;
+
+select t1.doc11.string, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where t1.doc11.string = t2.doc21.string;
+
+##
+## non-convering index for two table equi-join
+##
+
+# int
+explain extended select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where t1.doc11.int = t2.doc21.int;
+
+select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where t1.doc11.int = t2.doc21.int;
+
+# bool
+explain extended select t1.doc11.bool, t1.doc11.string, t2.doc21.bool, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where t1.doc11.bool = t2.doc21.bool and t1.doc11.bool is false;
+
+# double
+explain extended select t1.doc11.double, t1.doc11.string, t2.doc21.double, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where t1.doc11.double = t2.doc21.double;
+
+--echo NOT-A-BUG: Caused by the inaccuracy of double in MySQL
+select t1.doc11.double, t1.doc11.string, t2.doc21.double, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where t1.doc11.double = t2.doc21.double;
+
+# string
+explain extended select t1.doc11.string, t1.doc11.int, t2.doc21.string, t2.doc21.int
+from t1 use document keys, t2 use document keys
+where t1.doc11.string = t2.doc21.string;
+
+select t1.doc11.string, t1.doc11.int, t2.doc21.string, t2.doc21.int
+from t1 use document keys, t2 use document keys
+where t1.doc11.string = t2.doc21.string;
+
+##
+## covering index for two table range join
+##
+
+# int
+explain extended select t1.doc11.int, t2.doc21.int
+from t1 use document keys, t2 use document keys
+where t1.doc11.int > t2.doc21.int and t2.doc21.int > 10;
+
+select t1.doc11.int, t2.doc21.int
+from t1 use document keys, t2 use document keys
+where t1.doc11.int > t2.doc21.int and t2.doc21.int > 10;
+
+explain extended select t1.doc11.int, t2.doc21.int
+from t1 use document keys, t2 use document keys
+where (t1.doc11.int between 3 and 8) and (t2.doc21.int between 7 and 9) and t1.doc11.int > t2.doc21.int;
+
+select t1.doc11.int, t2.doc21.int
+from t1 use document keys, t2 use document keys
+where (t1.doc11.int between 3 and 8) and (t2.doc21.int between 7 and 9) and t1.doc11.int > t2.doc21.int;
+
+# bool
+explain extended select t1.doc11.bool, t2.doc21.bool
+from t1 use document keys, t2 use document keys
+where t1.doc11.bool > t2.doc21.bool and t2.doc21.bool > 0;
+
+select t1.doc11.bool, t2.doc21.bool
+from t1 use document keys, t2 use document keys
+where t1.doc11.bool > t2.doc21.bool and t2.doc21.bool > 0;
+
+explain extended select t1.doc11.bool, t2.doc21.bool
+from t1 use document keys, t2 use document keys
+where (t1.doc11.bool between 1 and 2) and (t2.doc21.bool between 7 and 9) and t1.doc11.bool > t2.doc21.bool;
+
+select t1.doc11.bool, t2.doc21.bool
+from t1 use document keys, t2 use document keys
+where (t1.doc11.bool between 1 and 2) and (t2.doc21.bool between 7 and 9) and t1.doc11.bool > t2.doc21.bool;
+
+# double
+explain extended select t1.doc11.double, t2.doc21.double
+from t1 use document keys, t2 use document keys
+where t1.doc11.double > t2.doc21.double;
+
+--echo NOT-A-BUG: Caused by the inaccuracy of double in MySQL
+select t1.doc11.double, t2.doc21.double
+from t1 use document keys, t2 use document keys
+where t1.doc11.double > t2.doc21.double;
+
+explain extended select t1.doc11.double, t2.doc21.double
+from t1 use document keys, t2 use document keys
+where t1.doc11.double > t2.doc21.double and t2.doc21.double > 1.1;
+
+select t1.doc11.double, t2.doc21.double
+from t1 use document keys, t2 use document keys
+where t1.doc11.double > t2.doc21.double and t2.doc21.double > 1.1;
+
+explain extended select t1.doc11.double, t2.doc21.double
+from t1 use document keys, t2 use document keys
+where (t1.doc11.double between 1.1 and 9.9) and (t2.doc21.double between 2.2 and 11.11) and t1.doc11.double >= t2.doc21.double;
+
+select t1.doc11.double, t2.doc21.double
+from t1 use document keys, t2 use document keys
+where (t1.doc11.double between 1.1 and 9.9) and (t2.doc21.double between 2.2 and 11.11) and t1.doc11.double >= t2.doc21.double;
+
+# string
+explain extended select t1.doc11.string, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where t1.doc11.string > t2.doc21.string and t2.doc21.string > 'ggg';
+
+select t1.doc11.string, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where t1.doc11.string > t2.doc21.string and t2.doc21.string > 'ggg';
+
+explain extended select t1.doc11.string, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where (t1.doc11.string between 'bbb' and 'iii') and (t2.doc21.string between 'aa' and 'kkk') and t1.doc11.string >= t2.doc21.string;
+
+select t1.doc11.string, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where (t1.doc11.string between 'bbb' and 'iii') and (t2.doc21.string between 'aa' and 'kkk') and t1.doc11.string >= t2.doc21.string;
+
+##
+## non-covering index for two table range join
+##
+
+# int
+explain extended select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where t1.doc11.int > t2.doc21.int and t2.doc21.int > 10;
+
+select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where t1.doc11.int > t2.doc21.int and t2.doc21.int > 10;
+
+explain extended select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where (t1.doc11.int between 3 and 8) and (t2.doc21.int between 7 and 9) and t1.doc11.int > t2.doc21.int;
+
+select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where (t1.doc11.int between 3 and 8) and (t2.doc21.int between 7 and 9) and t1.doc11.int > t2.doc21.int;
+
+# bool
+explain extended select t1.doc11.bool, t1.doc11.string, t2.doc21.bool, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where t1.doc11.bool > t2.doc21.bool and t2.doc21.bool > 0;
+
+explain extended select t1.doc11.bool, t1.doc11.string, t2.doc21.bool, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where (t1.doc11.bool between 0 and 1) and (t2.doc21.bool between 1 and 2) and t1.doc11.bool >= t2.doc21.bool;
+
+# double
+explain extended select t1.doc11.double, t1.doc11.string, t2.doc21.double, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where t1.doc11.double > t2.doc21.double;
+
+--echo NOT-A-BUG: Caused by the inaccuracy of double in MySQL
+select t1.doc11.double, t1.doc11.string, t2.doc21.double, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where t1.doc11.double > t2.doc21.double;
+
+explain extended select t1.doc11.double, t1.doc11.string, t2.doc21.double, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where t1.doc11.double > t2.doc21.double and t2.doc21.double > 1.1;
+
+select t1.doc11.double, t1.doc11.string, t2.doc21.double, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where t1.doc11.double > t2.doc21.double and t2.doc21.double > 1.1;
+
+explain extended select t1.doc11.double, t1.doc11.string, t2.doc21.double, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where (t1.doc11.double between 2.2 and 12.12) and (t2.doc21.double between 1.1 and 9.9) and t1.doc11.double >= t2.doc21.double;
+
+select t1.doc11.double, t1.doc11.string, t2.doc21.double, t2.doc21.string
+from t1 use document keys, t2 use document keys
+where (t1.doc11.double between 2.2 and 12.12) and (t2.doc21.double between 1.1 and 9.9) and t1.doc11.double >= t2.doc21.double;
+
+# string
+explain extended select t1.doc11.string, t1.doc11.int, t2.doc21.string, t2.doc21.int
+from t1 use document keys, t2 use document keys
+where t1.doc11.string > t2.doc21.string and t2.doc21.string > 'ggg';
+
+select t1.doc11.string, t1.doc11.int, t2.doc21.string, t2.doc21.int
+from t1 use document keys, t2 use document keys
+where t1.doc11.string > t2.doc21.string and t2.doc21.string > 'ggg';
+
+explain extended select t1.doc11.string, t1.doc11.int, t2.doc21.string, t2.doc21.int
+from t1 use document keys, t2 use document keys
+where (t1.doc11.string between 'bb' and 'ggg') and (t2.doc21.string between 'aaa' and 'kkk') and (t1.doc11.string >= t2.doc21.string);
+
+select t1.doc11.string, t1.doc11.int, t2.doc21.string, t2.doc21.int
+from t1 use document keys, t2 use document keys
+where (t1.doc11.string between 'bb' and 'ggg') and (t2.doc21.string between 'aaa' and 'kkk') and (t1.doc11.string >= t2.doc21.string);
+
+##
+## covering index for three table equi-join
+##
+
+explain extended select t1.doc11.int, t2.doc21.int, t3.doc31.int
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.int = t2.doc21.int and t1.doc11.int = t3.doc31.int;
+
+select t1.doc11.int, t2.doc21.int, t3.doc31.int
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.int = t2.doc21.int and t1.doc11.int = t3.doc31.int;
+
+##
+## non-covering index for three table equi-join
+##
+
+# int
+explain extended select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string, t3.doc31.int, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.int = t2.doc21.int and t1.doc11.int = t3.doc31.int;
+
+select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string, t3.doc31.int, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.int = t2.doc21.int and t1.doc11.int = t3.doc31.int;
+
+# bool
+explain extended select t1.doc11.bool, t1.doc11.string, t2.doc21.bool, t2.doc21.string, t3.doc31.bool, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.bool = t2.doc21.bool and t1.doc11.bool = t3.doc31.bool;
+
+# double
+explain extended select t1.doc11.double, t1.doc11.string, t2.doc21.double, t2.doc21.string, t3.doc31.double, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.double = t2.doc21.double and t1.doc11.double = t3.doc31.double;
+
+select t1.doc11.double, t1.doc11.string, t2.doc21.double, t2.doc21.string, t3.doc31.double, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.double = t2.doc21.double and t1.doc11.double = t3.doc31.double;
+
+# string
+explain extended select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string, t3.doc31.int, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.string = t2.doc21.string and t1.doc11.string = t3.doc31.string;
+
+select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string, t3.doc31.int, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.string = t2.doc21.string and t1.doc11.string = t3.doc31.string;
+
+
+##
+## covering index for three table range join
+##
+
+# int
+explain extended select t1.doc11.int, t2.doc21.int, t3.doc31.int
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.int > t2.doc21.int and t2.doc21.int > t3.doc31.int and t3.doc31.int > 10;
+
+select t1.doc11.int, t2.doc21.int, t3.doc31.int
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.int > t2.doc21.int and t2.doc21.int > t3.doc31.int and t3.doc31.int > 10;
+
+explain extended select t1.doc11.int, t2.doc21.int, t3.doc31.int
+from t1 use document keys, t2 use document keys, t3 use document keys
+where (t1.doc11.int between 1 and 12) and (t2.doc21.int between 2 and 10) and (t3.doc31.int between 2 and 9)
+      and (t1.doc11.int <= t2.doc21.int and t2.doc21.int <= t3.doc31.int);
+
+select t1.doc11.int, t2.doc21.int, t3.doc31.int
+from t1 use document keys, t2 use document keys, t3 use document keys
+where (t1.doc11.int between 1 and 12) and (t2.doc21.int between 2 and 10) and (t3.doc31.int between 2 and 9)
+      and (t1.doc11.int <= t2.doc21.int and t2.doc21.int <= t3.doc31.int);
+
+# bool
+explain extended select t1.doc11.bool, t2.doc21.bool, t3.doc31.bool
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.bool > t2.doc21.bool and t2.doc21.bool > t3.doc31.bool and t3.doc31.bool > 0;
+
+explain extended select t1.doc11.bool, t2.doc21.bool, t3.doc31.bool
+from t1 use document keys, t2 use document keys, t3 use document keys
+where (t1.doc11.bool between 1 and 2) and (t2.doc21.bool between 1 and 2) and (t3.doc31.bool between 0 and 1)
+      and (t1.doc11.bool > t2.doc21.bool and t2.doc21.bool > t3.doc31.bool);
+
+# double
+explain extended select t1.doc11.double, t2.doc21.double, t3.doc31.double
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.double > t2.doc21.double and t2.doc21.double > t3.doc31.double and t3.doc31.double > 10.1;
+
+--echo NOT-A-BUG: Caused by the inaccuracy of double in MySQL
+select t1.doc11.double, t2.doc21.double, t3.doc31.double
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.double > t2.doc21.double and t2.doc21.double > t3.doc31.double and t3.doc31.double > 10.5;
+
+explain extended select t1.doc11.double, t2.doc21.double, t3.doc31.double
+from t1 use document keys, t2 use document keys, t3 use document keys
+where (t1.doc11.double between 0.1 and 99.9) and (t2.doc21.double between 1.1 and 11.11) and (t3.doc31.double between 2.2 and 12.12)
+      and (t1.doc11.double <= t2.doc21.double and t2.doc21.double <= t3.doc31.double);
+
+select t1.doc11.double, t2.doc21.double, t3.doc31.double
+from t1 use document keys, t2 use document keys, t3 use document keys
+where (t1.doc11.double between 0.1 and 99.9) and (t2.doc21.double between 1.1 and 11.11) and (t3.doc31.double between 2.2 and 12.12)
+      and (t1.doc11.double <= t2.doc21.double and t2.doc21.double <= t3.doc31.double);
+
+# string
+explain extended select t1.doc11.string, t2.doc21.string, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.string >= t2.doc21.string and t2.doc21.string >= t3.doc31.string and t3.doc31.string >= 'aa';
+
+select t1.doc11.string, t2.doc21.string, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.string >= t2.doc21.string and t2.doc21.string >= t3.doc31.string and t3.doc31.string >= 'aa';
+
+explain extended select t1.doc11.string, t2.doc21.string, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where (t1.doc11.string between 'a' and 'xxx') and (t2.doc21.string between 'aa' and 'kkk') and (t3.doc31.string between 'aaa' and 'jjj')
+      and (t1.doc11.string >= t2.doc21.string and t2.doc21.string >= t3.doc31.string);
+
+select t1.doc11.string, t2.doc21.string, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where (t1.doc11.string between 'a' and 'xxx') and (t2.doc21.string between 'aa' and 'kkk') and (t3.doc31.string between 'aaa' and 'jjj')
+      and (t1.doc11.string >= t2.doc21.string and t2.doc21.string >= t3.doc31.string);
+
+##
+## non-covering index for three table range join
+##
+
+# int
+explain extended select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string, t3.doc31.int, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.int > t2.doc21.int and t2.doc21.int > t3.doc31.int and t3.doc31.int > 10;
+
+select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string, t3.doc31.int, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.int > t2.doc21.int and t2.doc21.int > t3.doc31.int and t3.doc31.int > 10;
+
+explain extended select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string, t3.doc31.int, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where (t1.doc11.int between 0 and 13) and (t2.doc21.int between 1 and 12) and (t3.doc31.int between 2 and 11)
+      and (t1.doc11.int >= t2.doc21.int and t2.doc21.int >= t3.doc31.int);
+
+select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string, t3.doc31.int, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where (t1.doc11.int between 0 and 13) and (t2.doc21.int between 1 and 12) and (t3.doc31.int between 2 and 11)
+      and (t1.doc11.int >= t2.doc21.int and t2.doc21.int >= t3.doc31.int);
+
+# bool
+explain extended select t1.doc11.int, t1.doc11.bool, t2.doc21.int, t2.doc21.bool, t3.doc31.int, t3.doc31.bool
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.bool > t2.doc21.bool and t2.doc21.bool > t3.doc31.bool and t3.doc31.bool > 0;
+
+explain extended select t1.doc11.int, t1.doc11.bool, t2.doc21.int, t2.doc21.bool, t3.doc31.int, t3.doc31.bool
+from t1 use document keys, t2 use document keys, t3 use document keys
+where (t1.doc11.bool between 1 and 2) and (t2.doc21.bool between 1 and 2) and (t3.doc31.bool between 0 and 1)
+      and (t1.doc11.bool > t2.doc21.bool and t2.doc21.bool > t3.doc31.bool);
+
+# double
+explain extended select t1.doc11.int, t1.doc11.double, t2.doc21.int, t2.doc21.double, t3.doc31.int, t3.doc31.double
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.double > t2.doc21.double and t2.doc21.double > t3.doc31.double and t3.doc31.double > 10.1;
+
+--echo NOT-A-BUG: Caused by the inaccuracy of double in MySQL
+select t1.doc11.int, t1.doc11.double, t2.doc21.int, t2.doc21.double, t3.doc31.int, t3.doc31.double
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.double > t2.doc21.double and t2.doc21.double > t3.doc31.double and t3.doc31.double > 10.5;
+
+explain extended select t1.doc11.int, t1.doc11.double, t2.doc21.int, t2.doc21.double, t3.doc31.int, t3.doc31.double
+from t1 use document keys, t2 use document keys, t3 use document keys
+where (t1.doc11.double between 1.1 and 11.11) and (t2.doc21.double between 2.1 and 12.12) and (t3.doc31.double between 2.2 and 10.10)
+      and (t1.doc11.double <= t2.doc21.double and t2.doc21.double <= t3.doc31.double);
+
+select t1.doc11.int, t1.doc11.double, t2.doc21.int, t2.doc21.double, t3.doc31.int, t3.doc31.double
+from t1 use document keys, t2 use document keys, t3 use document keys
+where (t1.doc11.double between 1.1 and 11.11) and (t2.doc21.double between 2.1 and 12.12) and (t3.doc31.double between 2.2 and 10.10)
+      and (t1.doc11.double <= t2.doc21.double and t2.doc21.double <= t3.doc31.double);
+
+# string
+explain extended select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string, t3.doc31.int, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.string > t2.doc21.string and t2.doc21.string > t3.doc31.string and t3.doc31.string > 'ggg';
+
+select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string, t3.doc31.int, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where t1.doc11.string > t2.doc21.string and t2.doc21.string > t3.doc31.string and t3.doc31.string > 'ggg';
+
+explain extended select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string, t3.doc31.int, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where (t1.doc11.string between 'a' and 'jjj') and (t2.doc21.string between 'aa' and 'iii') and (t3.doc31.string between 'aaa' and 'kkk')
+      and (t1.doc11.string <= t2.doc21.string and t2.doc21.string <= t3.doc31.string);
+
+select t1.doc11.int, t1.doc11.string, t2.doc21.int, t2.doc21.string, t3.doc31.int, t3.doc31.string
+from t1 use document keys, t2 use document keys, t3 use document keys
+where (t1.doc11.string between 'a' and 'jjj') and (t2.doc21.string between 'aa' and 'iii') and (t3.doc31.string between 'aaa' and 'kkk')
+      and (t1.doc11.string <= t2.doc21.string and t2.doc21.string <= t3.doc31.string);
+
+
+#############################################################################
+###
+### Clean up
+###
+drop table t1, t2, t3, t6, t7, t8;
+--source include/rpl_end.inc

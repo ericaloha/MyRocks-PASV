@@ -1,0 +1,26 @@
+# embedded can't make more than one connection
+--source include/not_embedded.inc
+--source include/have_ssl_communication.inc
+# This test checks the packet number off the
+# network which is affected by compressed protocol
+--source include/not_compress.inc
+# Don't run this test under --rpc_protocol as it is validating connections
+# only
+--source include/not_rpc_protocol.inc
+
+--source connection_timeout_server_error_header.inc
+
+--echo ### (1) Connection con1 SSL
+connect (con1,localhost,root,,,,,SSL);
+
+--source connection_timeout_server_error_case1.inc
+
+--echo ### (2) Connection con2 SSL
+connect (con2,localhost,root,,,,,SSL);
+
+--source connection_timeout_server_error_case2.inc
+
+--echo ### (3) Connection con3 SSL
+connect (con3,localhost,root,,,,,SSL);
+
+--source connection_timeout_server_error_case3.inc

@@ -1,0 +1,3 @@
+--skip_innodb
+--skip_rocksdb
+--master_info_repository=file

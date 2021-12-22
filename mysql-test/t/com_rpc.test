@@ -1,0 +1,925 @@
+# Don't run this test using --rpc_protocol because it is testing the RPC
+# protocol directly
+--source include/not_rpc_protocol.inc
+
+# Deprecate EOF functionality required by this test not supported
+# in async client.
+--disable_async_client
+
+create database db_default;
+create database db_rpc;
+
+create user scriptro;
+
+--echo
+--echo # Case 1: Send queries that don't change state and don't create client session
+--echo
+connect (con1,localhost,root,,db_default);
+select user();
+select database();
+
+# Send a query with rpc query attributes.
+query_attrs_add rpc_role scriptro;
+query_attrs_add rpc_db db_rpc;
+
+# Send query with attributes set above. Check user matches attributes.
+select user();   # will return scripro
+
+# Stateless query so no rpc_id returned in reponse
+let $rpc_id=get_rpc_id();
+if ($rpc_id != "") {
+  echo Fail: Found rpc_id in response.;
+}
+
+# Check db name matches the attribute
+select database();  # will return db_rpc
+
+query_attrs_delete rpc_role;
+query_attrs_delete rpc_db;
+
+--echo
+--echo # Case 2: Send other stateless query with different rpc attributes
+--echo
+
+query_attrs_add rpc_role root;
+query_attrs_add rpc_db db_default;
+
+# Send query with attributes set above.
+select user();   # will return root
+
+# create table is also stateless query, should not return an rpc_id
+CREATE TABLE t2 (i int, s char (10));
+let $rpc_id=get_rpc_id();
+if ($rpc_id != "") {
+  echo Fail: Found rpc_id in response for CREATE TABLE;
+}
+
+--echo
+--echo # Send a wrong formatted rpc_id
+--echo
+connect (close_conn,127.0.0.1,root,,db_default);
+
+# add an rpc_id with a wrong format
+query_attrs_add rpc_id 123wrong_format;
+--error ER_RPC_MALFORMED_ID
+SELECT 1;
+
+# add an rpc_id that's never been used before
+query_attrs_delete rpc_id;
+query_attrs_add rpc_id 4000000000;
+--error ER_RPC_INVALID_ID
+SELECT 1;
+
+disconnect close_conn;
+
+--echo
+--echo # Case 3: Send queries that change state and create client session
+--echo
+
+connection con1;
+
+SET @my_var='new_value';
+let $rpc_id1=get_rpc_id();
+# Check that rpc_id is returned in response.
+if ($rpc_id1 == "") {
+  echo Fail: Did not find rpc_id after SET @my_var.;
+}
+
+SET SESSION wait_timeout=100;
+let $rpc_id2=get_rpc_id();
+# Check that rpc_id is returned in response.
+if ($rpc_id2 == "") {
+  echo Fail: Did not find rpc_id after SET SESSION var.;
+}
+
+SELECT 1;
+let $rpc_id=get_rpc_id();
+if ($rpc_id != "") {
+  echo Fail: Stateless query should not have an rpc_id.;
+}
+
+BEGIN;
+let $rpc_id3=get_rpc_id();
+# Check that rpc_id is returned in response.
+if ($rpc_id3 == "") {
+  echo Fail: Did not find rpc_id after BEGIN transaction.;
+}
+
+SELECT GET_LOCK("my_lock", 0);
+let $lock_rpc_id=get_rpc_id();
+# Check that rpc_id is returned in response.
+if ($lock_rpc_id == "") {
+  echo Fail: Did not find rpc_id after GET_LOCK.;
+}
+
+# getting same lock from same session will work, even if from different conn
+connect (con2,localhost,root,,db_rpc);
+query_attrs_add rpc_id $lock_rpc_id;
+SELECT GET_LOCK("my_lock", 0);
+
+query_attrs_delete rpc_id;
+
+# this will fail to get the lock as it's new session and can't take the lock
+SELECT GET_LOCK("my_lock", 0);
+
+# release named locks
+query_attrs_add rpc_id $lock_rpc_id;
+SELECT RELEASE_LOCK('my_lock');
+let $rpc_id=get_rpc_id();
+if ($rpc_id != "") {
+  echo Fail: Found rpc_id after RELEASE_ALL_LOCKS.;
+}
+query_attrs_delete rpc_id;
+
+
+connection con1;
+
+CREATE TEMPORARY TABLE t3 (i int, s char (10));
+let $rpc_id4=get_rpc_id();
+# Check that rpc_id is returned in response.
+if ($rpc_id4 == "") {
+  echo Fail: Did not find rpc_id after CREATE TEMPORARY TABLE.;
+}
+
+query_attrs_delete rpc_role;
+query_attrs_delete rpc_db;
+
+--echo
+--echo # Case 4: Create temporary table in one connection and use it in another
+--echo
+
+# Create a temporary table in con2 and query from con1.
+connection con2;
+query_attrs_add rpc_role root;
+query_attrs_add rpc_db db_default;
+CREATE TEMPORARY TABLE t3 (i int, s char (10));
+
+let $rpc_id5=get_rpc_id();
+if ($rpc_id5 == "") {
+  echo Fail: Did not find rpc_id after CREATE TEMPORARY TABLE.;
+}
+query_attrs_add rpc_id $rpc_id5;
+
+insert into t3 values(1, "a");
+
+# Disconnecting con2 will not destroy the client_session session.
+disconnect con2;
+
+# Use temporary table from con1 by sending queries in client_session.
+connection con1;
+--echo # Trying to access temp table before setting the session id will fail.
+--error 1146
+select * from t3;
+
+query_attrs_add rpc_id $rpc_id5;
+select * from t3;
+insert into t3 values(2, "b");
+
+disconnect con1;
+
+# Select all from a new connection as well
+connect (con1,localhost,root,,db_default);
+query_attrs_add rpc_id $rpc_id5;
+select * from t3;
+
+--echo
+--echo # Test that LOCK TABLE creates session
+--echo
+query_attrs_delete rpc_id;
+query_attrs_delete rpc_role;
+query_attrs_delete rpc_db;
+
+query_attrs_add rpc_role root;
+query_attrs_add rpc_db db_default;
+
+LOCK TABLE t2 READ;
+let $rpc_id6=get_rpc_id();
+# Check that rpc_id is returned in response.
+if ($rpc_id6 == "") {
+  echo Fail: Did not find rpc_id after LOCK TABLE.;
+}
+query_attrs_add rpc_id $rpc_id6;
+SELECT 1;
+let $rpc_id=get_rpc_id();
+if ($rpc_id != $rpc_id6) {
+  echo Fail: Did not find rpc_id while LOCK TABLE active.;
+}
+UNLOCK TABLES;
+let $rpc_id=get_rpc_id();
+if ($rpc_id != "") {
+  echo Fail: Found rpc_id after UNLOCK TABLES.;
+}
+
+connection default;
+--replace_result $rpc_id6 rpc_id6
+eval KILL $rpc_id6;
+
+--echo
+--echo # Case 5: Attempt to use same session from multiple threads
+--echo
+
+# send a long select to have the rpc session in use
+connection con1;
+query_attrs_delete rpc_id;
+query_attrs_add rpc_id $rpc_id1;
+send select sleep(5);
+
+let $i= 5;
+while ($i > 1)
+{
+  connect (con$i, localhost, root, ,db_default);
+  dec $i;
+}
+# all these connections will get errors as session is in use
+let $i= 5;
+while($i > 1)
+{
+  connection con$i;
+  query_attrs_add rpc_id $rpc_id1;
+  --error ER_RPC_FAILED_TO_ATTACH
+  select 1;
+  disconnect con$i;
+  dec $i;
+}
+
+connection con1;
+reap;
+disconnect con1;
+
+connection default;
+let $wait_condition = select count(*) = 1 from information_schema.processlist;
+--source include/wait_condition.inc
+
+--echo
+--echo # Case 6: Test "show processlist" commands
+--echo
+
+# one connection without rpc for comparison of output
+connect (con1, localhost, root, ,db_default);
+send select sleep(5);
+
+# run show commands
+connection default;
+let $wait_condition = select count(*) = 1 from information_schema.processlist
+  where state = "User sleep";
+--source include/wait_condition.inc
+
+--replace_column 11 # 6 0
+--replace_regex /[1-9][0-9]*/1/
+show processlist;
+--replace_regex /[1-9][0-9]*/1/
+--replace_column 6 0
+select * from information_schema.processlist;
+--replace_column 6 0 7 # 8 # 9 #
+--replace_regex /[1-9][0-9]*/1/
+show transaction_list;
+--replace_column 6 0 7 # 8 # 9 #
+--replace_regex /[1-9][0-9]*/1/
+select * from information_schema.transaction_list;
+
+connection con1;
+reap;
+
+--echo
+--echo # Case 7: Test "show srv_sessions" commands
+--echo
+
+connection default;
+--replace_column 6 0 11 #
+--replace_regex /[1-9][0-9]*/1/
+show srv_sessions;
+--replace_column 6 0
+--replace_regex /[1-9][0-9]*/1/
+--replace_column 6 0
+select * from information_schema.srv_sessions;
+
+--echo
+--echo # Case 8: Test KILL srv_session
+--echo
+
+# Create a new srv session
+connect (con2, localhost, root,,db_default);
+query_attrs_add rpc_role root;
+query_attrs_add rpc_db db_default;
+SET @my_var='new_value';
+let $rpc_id=get_rpc_id();
+
+--replace_column 1 1 6 0
+--replace_result $rpc_id rpc_id
+eval select * from information_schema.srv_sessions where id=$rpc_id;
+
+--echo # KILL Unattached Session. It will be removed from session list.
+connection default;
+--replace_result $rpc_id rpc_id
+eval KILL $rpc_id;
+
+# KILLing detached sessions occurs out-of-bound.  Wait for it...
+let $wait_condition =
+    select count(*) = 0 from information_schema.srv_sessions where id=$rpc_id;
+--source include/wait_condition.inc
+
+--echo # Connection should not be killed
+connection con2;
+select 1;
+
+--echo # Trying to use the rpc_id will get an error
+query_attrs_add rpc_id $rpc_id;
+--replace_result $rpc_id <rpc_id>
+--error ER_RPC_INVALID_ID
+select 1;
+
+--echo
+--echo # Kill Query in Attached Session
+# get lock from another connection
+connect (con3, localhost, root,,db_default);
+SELECT GET_LOCK("my_lock", 0);
+
+# create an SRV Session
+connect (con4, localhost, root,,db_default);
+query_attrs_add rpc_role root;
+query_attrs_add rpc_db db_default;
+SET @my_var='new_value';
+let $rpc_id=get_rpc_id();
+
+# attempt to get lock from the SRV session, query remain running
+query_attrs_add rpc_id $rpc_id;
+--send SELECT GET_LOCK('my_lock', 3600)
+
+# check session is attached to connection thread and query is being executed
+connection default;
+let $wait_condition = select count(*) = 1 from information_schema.processlist where SRV_ID=$rpc_id and COMMAND='Query attributes';
+--source include/wait_condition.inc
+--replace_result 3600 TIMEOUT $rpc_id rpc_id
+--replace_column 9 1 6 0
+eval select * from information_schema.srv_sessions where id=$rpc_id;
+--replace_result 3600 TIMEOUT $rpc_id rpc_id
+--replace_column 1 1 6 0
+eval select * from information_schema.processlist where SRV_ID=$rpc_id;
+
+# kill only the query
+--replace_result $rpc_id rpc_id
+eval KILL QUERY $rpc_id;
+let $wait_condition = select count(*) = 0 from information_schema.processlist where SRV_ID=$rpc_id;
+--source include/wait_condition.inc
+
+--replace_result $rpc_id rpc_id
+--replace_column 6 0
+eval select * from information_schema.srv_sessions where id=$rpc_id;
+--replace_result $rpc_id rpc_id
+--replace_column 6 0
+eval select * from information_schema.processlist where SRV_ID=$rpc_id;
+
+--echo
+--echo # Kill Attached Session. Will stop query and remove the session
+connection con4;
+reap;
+--send SELECT GET_LOCK('my_lock', 3600)
+
+# KILL Connection will remove the SRV session
+connection default;
+--replace_result $rpc_id rpc_id
+eval KILL $rpc_id;
+let $wait_condition = select count(*) = 0 from information_schema.srv_sessions where ID=$rpc_id;
+--source include/wait_condition.inc
+
+--replace_result $rpc_id rpc_id
+--replace_column 6 0
+eval select * from information_schema.srv_sessions where id=$rpc_id;
+--replace_result $rpc_id rpc_id
+--replace_column 6 0
+eval select * from information_schema.processlist where SRV_ID=$rpc_id;
+
+--echo
+--echo # KILL conn thd that is running a srv session will kill the srv session
+connect (con5, localhost, root,,db_default);
+let $connection_id=`SELECT CONNECTION_ID()`;
+
+query_attrs_add rpc_role root;
+query_attrs_add rpc_db db_default;
+SET @my_var='new_value';
+let $rpc_id6=get_rpc_id();
+
+query_attrs_add rpc_id $rpc_id6;
+--send SELECT GET_LOCK('my_lock', 3600)
+
+connection default;
+let $wait_condition = select count(*) = 1 from information_schema.processlist
+  where state = "User lock" and srv_id = $rpc_id6;
+--source include/wait_condition.inc
+--replace_result $connection_id ID
+eval KILL QUERY $connection_id;
+
+# try to use this connection
+connection con5;
+reap;
+SELECT 1;
+
+--echo
+--echo # KILL for an unexisting conn thd id
+connection default;
+--replace_result $rpc_id rpc_id
+--error 1094
+eval KILL $rpc_id;  # will fail as it was already removed up above
+
+--echo
+# cleanup, keep this at the end of the test.
+# disconnect all connections
+let $i= 5;
+while($i)
+{
+  disconnect con$i;
+  dec $i;
+}
+
+connection default;
+
+# delete all sessions
+--replace_result $rpc_id1 rpc_id
+eval KILL $rpc_id1;
+--replace_result $rpc_id2 rpc_id
+eval KILL $rpc_id2;
+--replace_result $rpc_id3 rpc_id
+eval KILL $rpc_id3;
+--replace_result $rpc_id4 rpc_id
+eval KILL $rpc_id4;
+--replace_result $rpc_id5 rpc_id
+eval KILL $rpc_id5;
+--replace_result $rpc_id6 rpc_id
+eval KILL $rpc_id6;
+--replace_result $lock_rpc_id lock_rpc_id
+eval KILL $lock_rpc_id;
+
+# should be nothing left in srv_sessions and processlist
+let $wait_condition = select count(id) = 0 from information_schema.srv_sessions;
+--source include/wait_condition.inc
+select count(id) from information_schema.srv_sessions;
+select count(id) from information_schema.processlist;
+
+--echo
+--echo # Case 9: Attempt specifying roll without permissions
+--echo
+
+# create a proxy user - initially without proxy permission 0 since the
+# 'root' user automatically can proxy as anyone.
+create user proxyuser;
+
+connect (conproxy,localhost,proxyuser,,);
+
+# attempt to run as scriptro from proxyuser - should fail
+query_attrs_add rpc_role scriptro;
+query_attrs_add rpc_db db_rpc;
+--error ER_RPC_NO_PERMISSION
+SELECT 1;
+disconnect conproxy;
+
+# now grant proxy rights for scriptro to proxyuser
+connection default;
+grant proxy on scriptro to proxyuser;
+
+# try the to run as proxy user again
+connect (conproxy,localhost,proxyuser,,);
+query_attrs_add rpc_role scriptro;
+query_attrs_add rpc_db db_rpc;
+
+SELECT 1;
+SELECT user();
+SELECT database();
+
+# now revoke the proxy permission for proxyuser on scriptro
+connection default;
+revoke proxy on scriptro from proxyuser;
+
+# proxyuser should no longer have proxy rights on scriptro
+connection conproxy;
+--error ER_RPC_NO_PERMISSION
+SELECT 1;
+disconnect conproxy;
+
+# Now try it again with granting proxy privelege on all users
+connection default;
+create user scriptrw;
+grant proxy on '%' to proxyuser;
+
+connect (conproxy,localhost,proxyuser,,);
+query_attrs_add rpc_role scriptro;
+query_attrs_add rpc_db db_rpc;
+SELECT user();
+
+query_attrs_delete rpc_role;
+query_attrs_add rpc_role scriptrw;
+SELECT user();
+
+# Now revoke the proxy privilege
+connection default;
+revoke proxy on '%' from proxyuser;
+
+connection conproxy;
+--error ER_RPC_NO_PERMISSION
+SELECT user();
+disconnect conproxy;
+
+--echo
+--echo # Case 10: Make sure a detached session times out when idle
+--echo
+
+connect (con1,localhost,root,,db_default);
+
+# Send a query with rpc query attributes.
+query_attrs_add rpc_role scriptro;
+query_attrs_add rpc_db db_rpc;
+
+SET @my_var='new_value';
+let $rpc_id=get_rpc_id();
+# Check that rpc_id is returned in response.
+if ($rpc_id == "") {
+  echo Fail: Did not find rpc_id after SET SESSION var.;
+}
+
+query_attrs_add rpc_id $rpc_id;
+SET SESSION wait_timeout=5;
+
+# An immediate query should succeed
+SELECT 1;
+
+connection default;
+SELECT sleep(2);
+
+# A query 2 seconds later should succeed
+connection con1;
+SELECT 1;
+
+connection default;
+SELECT sleep(6);
+
+# A query 6 seconds later should fail
+connection con1;
+--replace_result 5000ms 5000ms $rpc_id <rpc_id>
+--error ER_RPC_IDLE_TIMEOUT
+SELECT 1;
+
+# make sure it is repeatable
+--replace_result 5000ms 5000ms $rpc_id <rpc_id>
+--error ER_RPC_IDLE_TIMEOUT
+SELECT 1;
+
+# make sure the connection itself hasn't timed out which won't happen
+# because connection and session timeouts are tracked separately
+query_attrs_delete rpc_id;
+SELECT 1;
+
+connection default;
+SELECT sleep(11); # sleep more than 2 times the idle timeout
+
+connection con1;
+query_attrs_add rpc_id $rpc_id;
+--replace_result $rpc_id <rpc_id>
+--error ER_RPC_INVALID_ID
+SELECT 1;
+
+disconnect con1;
+
+--echo
+--echo # Case 11: Make sure a detached session that times out cleans up
+--echo
+
+connect (con1,localhost,root,,db_default);
+
+# Send a query with rpc query attributes.
+query_attrs_add rpc_role scriptro;
+query_attrs_add rpc_db db_rpc;
+
+SELECT GET_LOCK("my_lock_case_11", 0);
+let $rpc_id=get_rpc_id();
+# Check that rpc_id is returned in response.
+if ($rpc_id == "") {
+  echo Fail: Did not find rpc_id after GET_LOCK.;
+}
+
+query_attrs_add rpc_id $rpc_id;
+SET SESSION wait_timeout=5;
+
+# A different session should not be able to get the lock
+connection default;
+SELECT GET_LOCK("my_lock_case_11", 0);
+
+# Sleep past the original sessions idle timeout
+SELECT sleep(6);
+
+# Now we expect to be able to get the lock
+SELECT GET_LOCK("my_lock_case_11", 0);
+
+disconnect con1;
+
+--echo
+--echo # Case 12: Test idle timeout for multiple detached sessions
+--echo
+
+connect (con1,localhost,root,,db_default);
+
+# Send a query with rpc query attributes.
+query_attrs_add rpc_role scriptro;
+query_attrs_add rpc_db db_rpc;
+
+SELECT GET_LOCK("my_lock1", 0);
+let $rpc_id1=get_rpc_id();
+# Check that rpc_id is returned in response.
+if ($rpc_id == "") {
+  echo Fail: Did not find rpc_id after GET_LOCK.;
+}
+
+SELECT GET_LOCK("my_lock2", 0);
+let $rpc_id2=get_rpc_id();
+if ($rpc_id2 == "") {
+  echo Fail: Did not find rpc_id after GET_LOCK.;
+}
+
+SELECT GET_LOCK("my_lock3", 0);
+let $rpc_id3=get_rpc_id();
+if ($rpc_id3 == "") {
+  echo Fail: Did not find rpc_id after GET_LOCK.;
+}
+
+query_attrs_delete rpc_role;
+query_attrs_delete rpc_db;
+
+query_attrs_add rpc_id $rpc_id1;
+SET SESSION wait_timeout=3;
+
+query_attrs_delete rpc_id;
+query_attrs_add rpc_id $rpc_id2;
+SET SESSION wait_timeout=6;
+
+query_attrs_delete rpc_id;
+query_attrs_add rpc_id $rpc_id3;
+SET SESSION wait_timeout=9;
+
+# Show detached sessions
+connection default;
+SELECT sleep(1);
+--replace_column 1 # 6 # 11 #
+SHOW srv_sessions;  # expect 3 detached sessions
+
+SELECT sleep(3);
+--replace_column 1 # 6 # 11 #
+SHOW srv_sessions;  # expect 2 detached sessions
+
+SELECT sleep(3);
+--replace_column 1 # 6 # 11 #
+SHOW srv_sessions;  # expect 1 detached session
+
+SELECT sleep(3);
+--replace_column 1 # 6 # 11 #
+SHOW srv_sessions;  # expect 0 detached sessions
+
+# Now we expect to be able to get the locks
+SELECT GET_LOCK("my_lock1", 0);
+SELECT RELEASE_LOCK("my_lock1");
+SELECT GET_LOCK("my_lock2", 0);
+SELECT RELEASE_LOCK("my_lock2");
+SELECT GET_LOCK("my_lock3", 0);
+SELECT RELEASE_LOCK("my_lock3");
+
+disconnect con1;
+
+--echo
+--echo # Case 13: Make sure large responses are returned correctly
+--echo
+
+connect (con1,localhost,root,,db_default);
+
+# Send a query with rpc query attributes.
+query_attrs_add rpc_role scriptro;
+query_attrs_add rpc_db db_rpc;
+
+SET SESSION wait_timeout=5;
+let $rpc_id=get_rpc_id();
+
+# Now execute a command that generates a very large packet (~100Mb) and make
+# sure we get the data back even though we are using a detached session
+connect (con2,localhost,root,,db_default);
+SELECT USER();
+
+query_attrs_add rpc_id $rpc_id;
+--replace_regex(/XX+/<4Mb of 'X's>/
+SELECT USER(), REPEAT('X', 4000000), REPEAT('X', 4000000),
+       REPEAT('X', 4000000), REPEAT('X', 4000000), REPEAT('X', 4000000),
+       REPEAT('X', 4000000), REPEAT('X', 4000000), REPEAT('X', 4000000),
+       REPEAT('X', 4000000), REPEAT('X', 4000000), REPEAT('X', 4000000),
+       REPEAT('X', 4000000), REPEAT('X', 4000000), REPEAT('X', 4000000),
+       REPEAT('X', 4000000), REPEAT('X', 4000000), REPEAT('X', 4000000),
+       REPEAT('X', 4000000), REPEAT('X', 4000000), REPEAT('X', 4000000),
+       REPEAT('X', 4000000), REPEAT('X', 4000000), REPEAT('X', 4000000),
+       REPEAT('X', 4000000), REPEAT('X', 4000000);
+
+disconnect con2;
+disconnect con1;
+
+--echo
+--echo # Case 14: Make sure character set is being handled
+--echo
+
+--character_set cp1251
+connect (con1,localhost,root,,db_default);
+--echo
+--echo the character set (client/connection/results) for con1 should be cp1251
+--echo
+# default connection
+SHOW VARIABLES LIKE 'character\_set\_%';
+
+# now detach the session
+query_attrs_add rpc_role scriptro;
+query_attrs_add rpc_db db_rpc;
+SET @my_var='new_value';
+let $rpc_id = get_rpc_id();
+disconnect con1;
+
+connect (con2,localhost,root,,db_default);
+query_attrs_add rpc_id $rpc_id;
+--echo
+--echo the character set for a detached session should be cp1251
+--echo
+SHOW VARIABLES LIKE 'character\_set\_%';
+disconnect con2;
+
+--character_set latin1
+connect (con2,localhost,root,,db_default);
+--echo
+--echo The charset for this new connection should be switched back to latin1
+--echo
+SHOW VARIABLES LIKE 'character\_set\_%';
+
+query_attrs_add rpc_id $rpc_id;
+--echo
+--echo reusing the rpc_id created above should still have the old charset info
+--echo
+SHOW VARIABLES LIKE 'character\_set\_%';
+
+query_attrs_delete rpc_id;
+query_attrs_add rpc_role scriptro;
+query_attrs_add rpc_db db_rpc;
+set @my_var='new_value';
+let $rpc_id2 = get_rpc_id();
+disconnect con2;
+
+connect (con3,localhost,root,,db_default);
+query_attrs_add rpc_id $rpc_id2;
+--echo
+--echo A newly created rpc_id with latin1 charset should show latin1
+--echo
+SHOW VARIABLES LIKE 'character\_set\_%';
+--echo
+--echo Make sure changing the charset midflight on a detached session works
+--echo
+SET NAMES 'cp1251';
+SHOW VARIABLES LIKE 'character\_set\_%';
+
+disconnect con3;
+
+
+connection default;
+--replace_result $rpc_id rpc_id
+eval KILL $rpc_id;
+--replace_result $rpc_id2 rpc_id
+eval KILL $rpc_id2;
+
+--echo
+--echo # Case 15: Test Multiquery
+--echo
+# TODO: Multi query 1: Q1 changes state, Q2 reads the state change
+#       Multi query 2: Q1 reads previous state change, Q2 changes state, Q3 reads new change
+connect (con1,localhost,root,,db_default);
+--query_attrs_add rpc_role scriptro
+--query_attrs_add rpc_db db_rpc
+# Single query to get rpc_id since mtr can't get it from a multiquery
+set @my_var='value_1';
+let $rpc_id=get_rpc_id();
+disconnect con1;
+
+connect (con2,localhost,root,,db_default);
+--query_attrs_delete rpc_role
+--query_attrs_delete rpc_db
+--query_attrs_add rpc_id $rpc_id
+
+delimiter |;
+SET @my_var='new_value';SELECT @my_var|
+delimiter ;|
+
+delimiter |;
+SELECT @my_var; SET @my_var='other_value'; SELECT @my_var|
+delimiter ;|
+disconnect con2;
+
+connection default;
+--disable_query_log
+eval KILL $rpc_id;
+--enable_query_log
+
+--echo
+--echo # Case 16: Per-user-session-variables
+--echo
+
+connection default;
+SET @original_val = @@global.per_user_session_var_default_val;
+
+SET @@global.per_user_session_var_default_val = "scriptro:lock_wait_timeout=23";
+connect (conn,localhost,root,,db_default);
+--query_attrs_add rpc_role scriptro
+--query_attrs_add rpc_db db_rpc
+
+SELECT @@global.lock_wait_timeout, @@session.lock_wait_timeout;
+
+# This is not expected but need to do cleanup while bug persists
+let $rpc_id=get_rpc_id();
+connection default;
+--disable_query_log
+eval KILL $rpc_id;
+--enable_query_log
+connection conn;
+
+disconnect conn;
+
+connection default;
+SET @@global.per_user_session_var_default_val = @original_val;
+SELECT @@global.per_user_session_var_default_val;
+
+--echo
+--echo # Case 17: CONNECTION_ID() on detached session is non-zero and
+--echo #          different than the original connection
+--echo
+
+connect (conn,localhost,root,,db_default);
+
+# get the original connection id
+let $orig_id = `SELECT CONNECTION_ID()`;
+
+--query_attrs_add rpc_role scriptro
+--query_attrs_add rpc_db db_rpc
+
+# get the id of the attached session using rpc_role
+let $attached_id = `SELECT CONNECTION_ID()`;
+
+# now cause the session to detach
+SET @my_var='new_value';
+let $rpc_id=get_rpc_id();
+--query_attrs_delete rpc_role
+--query_attrs_delete rpc_db
+--query_attrs_add rpc_id $rpc_id
+
+let $detached_id = `SELECT CONNECTION_ID()`;
+
+--query_attrs_delete rpc_id
+let $final_id = `SELECT CONNECTION_ID()`;
+
+disconnect conn;
+
+connection default;
+# We expect that the value returned from connection_id() should be different
+# once we start using an attached session when rpc_role is specified.  It
+# should be non-zero.  Detaching should not change the value.
+# Finally after we stop using rpc_id the connection id should be the same as
+# we started with
+--replace_result $orig_id orig_id $attached_id attached_id
+eval SELECT $attached_id != 0, $attached_id = $detached_id,
+            $orig_id != $attached_id, $final_id = $orig_id;
+
+--echo
+--echo # Case 18: NOW() on a detached session returns the correct time
+--echo #          An early bug had it returning the time the session was
+--echo #          detached
+--echo
+
+connect (conn,localhost,root,,db_default);
+
+# use an rpc_role
+--query_attrs_add rpc_role scriptro
+--query_attrs_add rpc_db db_rpc
+
+# run a query that causes state change
+SET @my_var='new_value';
+let $rpc_id=get_rpc_id();
+--query_attrs_delete rpc_role
+--query_attrs_delete rpc_db
+--query_attrs_add rpc_id $rpc_id
+
+let $first_time = `SELECT second(now())`;
+sleep 2;
+let $second_time = `SELECT second(now())`;
+--replace_result $first_time time1 $second_time time2
+eval SELECT IF($first_time != $second_time, 'Succeeded', 'Failed');
+
+disconnect conn;
+
+
+# delete all dbs and users
+connection default;
+
+drop database db_default;
+drop database db_rpc;
+drop user scriptro;
+drop user scriptrw;
+drop user proxyuser;
+
+# Restarting the server allows us to check that all sessions were
+# appropriately destroyed.  If something is left around we'll get
+# an error about a plugin having references in the error file
+--source include/restart_mysqld.inc

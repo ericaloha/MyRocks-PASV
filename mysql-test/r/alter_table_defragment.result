@@ -1,0 +1,45 @@
+include/master-slave.inc
+Warnings:
+Note	####	Sending passwords in plain text without SSL/TLS is extremely insecure.
+Note	####	Storing MySQL user name or password information in the master info repository is not secure and is therefore not recommended. Please consider using the USER and PASSWORD connection options for START SLAVE; see the 'START SLAVE Syntax' in the MySQL Manual for more information.
+[connection master]
+drop table if exists t1;
+create table t1(a int not null primary key auto_increment, b varchar(256), key second(b)) engine=innodb;
+create table t2(a int not null primary key auto_increment, b varchar(256)) engine=myisam;
+insert into t1 values (1, REPEAT("a", 256));
+insert into t1 values (2, REPEAT("a", 256));
+alter table t1 defragment;
+alter table t1 defragment index primary;
+alter table t1 defragment index second;
+alter table t1 defragment index notexist;
+ERROR 42S12: Table './test/t1' has no index like the one used in CREATE INDEX; recreate the table
+insert into t2 values (1, REPEAT("a", 256));
+insert into t2 values (2, REPEAT("a", 256));
+alter table t2 defragment;
+ERROR 42000: The storage engine for the table doesn't support 
+alter table t3 defragment;
+ERROR 42S02: Table 'test.t3' doesn't exist
+set global innodb_defragment = 0;
+alter table t1 defragment;
+ERROR HY000: The 'ALTER TABLE DEFRAGMENT' feature is disabled; you need MySQL built with 'innodb_defragment' to have it working
+set global innodb_defragment = 1;
+show binlog events in 'master-bin.000001' from 120;
+Log_name	Pos	Event_type	Server_id	End_log_pos	Info
+master-bin.000001	120	Query	1	241	use `test`; DROP TABLE IF EXISTS `t1` 
+master-bin.000001	241	Query	1	414	use `test`; create table t1(a int not null primary key auto_increment, b varchar(256), key second(b)) engine=innodb
+master-bin.000001	414	Query	1	572	use `test`; create table t2(a int not null primary key auto_increment, b varchar(256)) engine=myisam
+master-bin.000001	572	Query	1	647	BEGIN
+master-bin.000001	647	Query	1	760	use `test`; insert into t1 values (1, REPEAT("a", 256))
+master-bin.000001	760	Xid	1	787	COMMIT 
+master-bin.000001	787	Query	1	862	BEGIN
+master-bin.000001	862	Query	1	975	use `test`; insert into t1 values (2, REPEAT("a", 256))
+master-bin.000001	975	Xid	1	1002	COMMIT 
+master-bin.000001	1002	Query	1	1077	BEGIN
+master-bin.000001	1077	Query	1	1190	use `test`; insert into t2 values (1, REPEAT("a", 256))
+master-bin.000001	1190	Query	1	1266	COMMIT
+master-bin.000001	1266	Query	1	1341	BEGIN
+master-bin.000001	1341	Query	1	1454	use `test`; insert into t2 values (2, REPEAT("a", 256))
+master-bin.000001	1454	Query	1	1530	COMMIT
+drop table t1;
+drop table t2;
+include/rpl_end.inc

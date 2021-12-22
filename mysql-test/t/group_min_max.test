@@ -1,0 +1,4 @@
+
+let $engine=MyISAM;
+--source include/group_min_max.inc
+

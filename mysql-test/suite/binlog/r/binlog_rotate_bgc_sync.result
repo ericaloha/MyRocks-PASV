@@ -1,0 +1,6 @@
+SET @saved_binlog_error_action= @@GLOBAL.binlog_error_action;
+SET GLOBAL binlog_error_action= ABORT_SERVER;
+SET @saved_sync_binlog= @@GLOBAL.sync_binlog;
+SET GLOBAL sync_binlog= 2;
+SET GLOBAL binlog_error_action= @saved_binlog_error_action;
+SET GLOBAL sync_binlog= @saved_sync_binlog;
